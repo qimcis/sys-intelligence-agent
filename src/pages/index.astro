@@ -1,16 +1,65 @@
 ---
-
+import Layout from '../layouts/Layout.astro';
 ---
 
-<html lang="en">
-	<head>
-		<meta charset="utf-8" />
-		<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-		<meta name="viewport" content="width=device-width" />
-		<meta name="generator" content={Astro.generator} />
-		<title>Astro</title>
-	</head>
-	<body>
-		<h1>Astro</h1>
-	</body>
-</html>
+<Layout title="System Intelligence Benchmark - Contributor">
+  <div class="block">
+    <div class="block-header">Overview</div>
+    <p style="color: var(--muted); font-size: 0.875rem; margin-bottom: 1rem;">
+      Add course exams and labs to the System Intelligence Benchmark repository.
+    </p>
+    <div class="row">
+      <a href="/exams" style="text-decoration: none;">
+        <div class="block" style="cursor: pointer; transition: border-color 0.15s;">
+          <div style="font-size: 1.25rem; margin-bottom: 0.5rem;">Exams</div>
+          <p style="color: var(--muted); font-size: 0.75rem;">
+            Upload PDF/TXT exam files and solutions. Generate structured exam.md format.
+          </p>
+        </div>
+      </a>
+      <a href="/labs" style="text-decoration: none;">
+        <div class="block" style="cursor: pointer; transition: border-color 0.15s;">
+          <div style="font-size: 1.25rem; margin-bottom: 0.5rem;">Labs</div>
+          <p style="color: var(--muted); font-size: 0.75rem;">
+            Submit GitHub repo URL. AI agent analyzes and creates courselab format.
+          </p>
+        </div>
+      </a>
+    </div>
+  </div>
+  
+  <div class="block">
+    <div class="block-header">Configuration</div>
+    <p style="color: var(--muted); font-size: 0.75rem; margin-bottom: 1rem;">
+      Set your OpenAI API key via environment variable or enter it below.
+    </p>
+    <label for="api-key">OpenAI API Key</label>
+    <input type="text" id="api-key" placeholder="sk-..." />
+    <button id="save-key">Save to Session</button>
+    <div id="key-status" class="status" style="display: none;"></div>
+  </div>
+  
+  <script>
+    const keyInput = document.getElementById('api-key') as HTMLInputElement;
+    const saveBtn = document.getElementById('save-key');
+    const keyStatus = document.getElementById('key-status');
+    
+    // Load saved key
+    const savedKey = sessionStorage.getItem('openai_api_key');
+    if (savedKey) {
+      keyInput.value = savedKey;
+    }
+    
+    saveBtn?.addEventListener('click', () => {
+      const key = keyInput.value.trim();
+      if (key) {
+        sessionStorage.setItem('openai_api_key', key);
+        if (keyStatus) {
+          keyStatus.style.display = 'block';
+          keyStatus.className = 'status success';
+          keyStatus.textContent = 'API key saved to session storage';
+        }
+      }
+    });
+  </script>
+</Layout>

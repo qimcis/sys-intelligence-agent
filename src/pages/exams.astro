@@ -1,0 +1,214 @@
+---
+import Layout from '../layouts/Layout.astro';
+---
+
+<Layout title="Add Exam - System Intelligence Benchmark">
+  <div class="block">
+    <div class="block-header">Exam Metadata</div>
+    <div class="row">
+      <div>
+        <label for="exam-id">Exam ID (unique, lowercase, underscores)</label>
+        <input type="text" id="exam-id" placeholder="cs537_fall_2021_final" />
+      </div>
+      <div>
+        <label for="exam-name">Exam Name</label>
+        <input type="text" id="exam-name" placeholder="CS537: Operating Systems Fall 2021 Final" />
+      </div>
+    </div>
+    <div class="row">
+      <div>
+        <label for="course">Course Name</label>
+        <input type="text" id="course" placeholder="Operating Systems" />
+      </div>
+      <div>
+        <label for="institution">Institution</label>
+        <input type="text" id="institution" placeholder="University of Wisconsin-Madison" />
+      </div>
+    </div>
+    <div class="row">
+      <div>
+        <label for="year">Year</label>
+        <input type="number" id="year" placeholder="2021" />
+      </div>
+      <div>
+        <label for="score-total">Total Score</label>
+        <input type="number" id="score-total" placeholder="100" />
+      </div>
+    </div>
+    <label for="tags">Tags (comma-separated)</label>
+    <input type="text" id="tags" placeholder="operating-systems, processes, virtual-memory" />
+  </div>
+  
+  <div class="block">
+    <div class="block-header">Upload Files</div>
+    <label>Exam PDF/TXT</label>
+    <div class="file-input" id="exam-dropzone">
+      <span>Click or drag to upload exam file</span>
+      <input type="file" id="exam-file" accept=".pdf,.txt" />
+      <div class="file-name" id="exam-filename"></div>
+    </div>
+    
+    <label>Solutions PDF/TXT</label>
+    <div class="file-input" id="solutions-dropzone">
+      <span>Click or drag to upload solutions file</span>
+      <input type="file" id="solutions-file" accept=".pdf,.txt" />
+      <div class="file-name" id="solutions-filename"></div>
+    </div>
+    
+    <label>Reference Materials (optional)</label>
+    <div class="file-input" id="reference-dropzone">
+      <span>Click or drag to upload reference materials</span>
+      <input type="file" id="reference-file" accept=".pdf,.txt,.md" multiple />
+      <div class="file-name" id="reference-filename"></div>
+    </div>
+  </div>
+  
+  <div class="block">
+    <div class="block-header">Additional Notes</div>
+    <label for="notes">Notes for AI Processing</label>
+    <textarea id="notes" placeholder="Any specific instructions for parsing the exam (e.g., 'Questions 1-5 are multiple choice', 'Skip question 7 as it has figures')"></textarea>
+  </div>
+  
+  <button id="process-btn" style="width: 100%;">Process and Add Exam</button>
+  
+  <div id="status-area" style="display: none;">
+    <div id="process-status" class="status loading">Processing...</div>
+    <div id="process-log" class="log"></div>
+  </div>
+  
+  <script>
+    // File input handlers
+    function setupFileInput(dropzoneId: string, inputId: string, filenameId: string) {
+      const dropzone = document.getElementById(dropzoneId)!;
+      const input = document.getElementById(inputId) as HTMLInputElement;
+      const filename = document.getElementById(filenameId)!;
+      
+      dropzone.addEventListener('click', () => input.click());
+      
+      dropzone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        dropzone.style.borderColor = 'var(--accent)';
+      });
+      
+      dropzone.addEventListener('dragleave', () => {
+        dropzone.style.borderColor = 'var(--border)';
+      });
+      
+      dropzone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dropzone.style.borderColor = 'var(--border)';
+        if (e.dataTransfer?.files) {
+          input.files = e.dataTransfer.files;
+          updateFilename(input, filename, dropzone);
+        }
+      });
+      
+      input.addEventListener('change', () => updateFilename(input, filename, dropzone));
+    }
+    
+    function updateFilename(input: HTMLInputElement, filename: HTMLElement, dropzone: HTMLElement) {
+      if (input.files && input.files.length > 0) {
+        const names = Array.from(input.files).map(f => f.name).join(', ');
+        filename.textContent = names;
+        dropzone.classList.add('has-file');
+      } else {
+        filename.textContent = '';
+        dropzone.classList.remove('has-file');
+      }
+    }
+    
+    setupFileInput('exam-dropzone', 'exam-file', 'exam-filename');
+    setupFileInput('solutions-dropzone', 'solutions-file', 'solutions-filename');
+    setupFileInput('reference-dropzone', 'reference-file', 'reference-filename');
+    
+    // Process button
+    const processBtn = document.getElementById('process-btn') as HTMLButtonElement;
+    const statusArea = document.getElementById('status-area')!;
+    const processStatus = document.getElementById('process-status')!;
+    const processLog = document.getElementById('process-log')!;
+    
+    processBtn.addEventListener('click', async () => {
+      const examId = (document.getElementById('exam-id') as HTMLInputElement).value.trim();
+      const examName = (document.getElementById('exam-name') as HTMLInputElement).value.trim();
+      const course = (document.getElementById('course') as HTMLInputElement).value.trim();
+      const institution = (document.getElementById('institution') as HTMLInputElement).value.trim();
+      const year = (document.getElementById('year') as HTMLInputElement).value.trim();
+      const scoreTotal = (document.getElementById('score-total') as HTMLInputElement).value.trim();
+      const tags = (document.getElementById('tags') as HTMLInputElement).value.trim();
+      const notes = (document.getElementById('notes') as HTMLTextAreaElement).value.trim();
+      
+      const examFile = (document.getElementById('exam-file') as HTMLInputElement).files?.[0];
+      const solutionsFile = (document.getElementById('solutions-file') as HTMLInputElement).files?.[0];
+      const referenceFiles = (document.getElementById('reference-file') as HTMLInputElement).files;
+      
+      // Validation
+      if (!examId || !examName || !course || !year || !examFile || !solutionsFile) {
+        alert('Please fill in all required fields and upload exam and solutions files.');
+        return;
+      }
+      
+      processBtn.disabled = true;
+      statusArea.style.display = 'block';
+      processStatus.className = 'status loading';
+      processStatus.textContent = 'Processing exam...';
+      processLog.textContent = '';
+      
+      const formData = new FormData();
+      formData.append('examId', examId);
+      formData.append('examName', examName);
+      formData.append('course', course);
+      formData.append('institution', institution);
+      formData.append('year', year);
+      formData.append('scoreTotal', scoreTotal);
+      formData.append('tags', tags);
+      formData.append('notes', notes);
+      formData.append('examFile', examFile);
+      formData.append('solutionsFile', solutionsFile);
+      
+      if (referenceFiles) {
+        for (let i = 0; i < referenceFiles.length; i++) {
+          formData.append('referenceFiles', referenceFiles[i]);
+        }
+      }
+      
+      // Get API key
+      const apiKey = sessionStorage.getItem('openai_api_key') || '';
+      if (apiKey) {
+        formData.append('apiKey', apiKey);
+      }
+      
+      try {
+        const response = await fetch('/api/exams/process', {
+          method: 'POST',
+          body: formData
+        });
+        
+        const reader = response.body?.getReader();
+        const decoder = new TextDecoder();
+        
+        if (reader) {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            const text = decoder.decode(value);
+            processLog.textContent += text;
+            processLog.scrollTop = processLog.scrollHeight;
+          }
+        }
+        
+        if (response.ok) {
+          processStatus.className = 'status success';
+          processStatus.textContent = 'Exam processed successfully!';
+        } else {
+          processStatus.className = 'status error';
+          processStatus.textContent = 'Error processing exam';
+        }
+      } catch (error) {
+        processStatus.className = 'status error';
+        processStatus.textContent = `Error: ${error}`;
+      }
+      
+      processBtn.disabled = false;
+    });
+  </script>
+</Layout>

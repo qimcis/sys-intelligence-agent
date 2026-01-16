@@ -1,0 +1,235 @@
+---
+interface Props {
+  title: string;
+}
+
+const { title } = Astro.props;
+---
+
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width" />
+    <meta name="generator" content={Astro.generator} />
+    <title>{title}</title>
+    <style is:global>
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+      
+      :root {
+        --bg: #0a0a0a;
+        --fg: #fafafa;
+        --border: #262626;
+        --muted: #737373;
+        --accent: #3b82f6;
+        --success: #22c55e;
+        --error: #ef4444;
+      }
+      
+      body {
+        font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+        background: var(--bg);
+        color: var(--fg);
+        min-height: 100vh;
+        line-height: 1.6;
+      }
+      
+      .container {
+        max-width: 800px;
+        margin: 0 auto;
+        padding: 2rem;
+      }
+      
+      header {
+        border-bottom: 1px solid var(--border);
+        padding-bottom: 1.5rem;
+        margin-bottom: 2rem;
+      }
+      
+      h1 {
+        font-size: 1.5rem;
+        font-weight: 600;
+        letter-spacing: -0.025em;
+      }
+      
+      nav {
+        display: flex;
+        gap: 1rem;
+        margin-top: 1rem;
+      }
+      
+      nav a {
+        color: var(--muted);
+        text-decoration: none;
+        padding: 0.5rem 1rem;
+        border: 1px solid var(--border);
+        font-size: 0.875rem;
+        transition: all 0.15s;
+      }
+      
+      nav a:hover,
+      nav a.active {
+        color: var(--fg);
+        border-color: var(--fg);
+      }
+      
+      .block {
+        border: 1px solid var(--border);
+        padding: 1.5rem;
+        margin-bottom: 1.5rem;
+      }
+      
+      .block-header {
+        font-size: 0.875rem;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        margin-bottom: 1rem;
+        padding-bottom: 0.5rem;
+        border-bottom: 1px solid var(--border);
+      }
+      
+      label {
+        display: block;
+        font-size: 0.75rem;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        margin-bottom: 0.5rem;
+      }
+      
+      input[type="text"],
+      input[type="number"],
+      input[type="url"],
+      textarea,
+      select {
+        width: 100%;
+        background: transparent;
+        border: 1px solid var(--border);
+        color: var(--fg);
+        padding: 0.75rem;
+        font-family: inherit;
+        font-size: 0.875rem;
+        margin-bottom: 1rem;
+      }
+      
+      input:focus,
+      textarea:focus,
+      select:focus {
+        outline: none;
+        border-color: var(--accent);
+      }
+      
+      textarea {
+        min-height: 100px;
+        resize: vertical;
+      }
+      
+      button {
+        background: var(--fg);
+        color: var(--bg);
+        border: none;
+        padding: 0.75rem 1.5rem;
+        font-family: inherit;
+        font-size: 0.875rem;
+        cursor: pointer;
+        transition: opacity 0.15s;
+      }
+      
+      button:hover {
+        opacity: 0.9;
+      }
+      
+      button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      
+      .file-input {
+        border: 1px dashed var(--border);
+        padding: 2rem;
+        text-align: center;
+        cursor: pointer;
+        transition: border-color 0.15s;
+        margin-bottom: 1rem;
+      }
+      
+      .file-input:hover {
+        border-color: var(--muted);
+      }
+      
+      .file-input input {
+        display: none;
+      }
+      
+      .file-input.has-file {
+        border-color: var(--success);
+        border-style: solid;
+      }
+      
+      .file-name {
+        font-size: 0.875rem;
+        color: var(--success);
+        margin-top: 0.5rem;
+      }
+      
+      .row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 1rem;
+      }
+      
+      .status {
+        padding: 1rem;
+        margin-top: 1rem;
+        font-size: 0.875rem;
+      }
+      
+      .status.success {
+        border: 1px solid var(--success);
+        color: var(--success);
+      }
+      
+      .status.error {
+        border: 1px solid var(--error);
+        color: var(--error);
+      }
+      
+      .status.loading {
+        border: 1px solid var(--accent);
+        color: var(--accent);
+      }
+      
+      .log {
+        background: #111;
+        border: 1px solid var(--border);
+        padding: 1rem;
+        font-size: 0.75rem;
+        max-height: 300px;
+        overflow-y: auto;
+        white-space: pre-wrap;
+        margin-top: 1rem;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <header>
+        <h1>System Intelligence Benchmark</h1>
+        <nav>
+          <a href="/" class={Astro.url.pathname === "/" ? "active" : ""}>Home</a>
+          <a href="/exams" class={Astro.url.pathname === "/exams" ? "active" : ""}>Add Exam</a>
+          <a href="/labs" class={Astro.url.pathname === "/labs" ? "active" : ""}>Add Lab</a>
+        </nav>
+      </header>
+      <main>
+        <slot />
+      </main>
+    </div>
+  </body>
+</html>

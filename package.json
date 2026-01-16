@@ -6,9 +6,15 @@
     "dev": "astro dev",
     "build": "astro build",
     "preview": "astro preview",
+    "start": "node ./dist/server/entry.mjs",
     "astro": "astro"
   },
   "dependencies": {
-    "astro": "^5.16.11"
+    "@astrojs/node": "^9.5.2",
+    "@types/pdf-parse": "^1.1.5",
+    "astro": "^5.16.11",
+    "dotenv": "^17.2.3",
+    "pdf-parse": "^2.4.5",
+    "simple-git": "^3.30.0"
   }
 }
