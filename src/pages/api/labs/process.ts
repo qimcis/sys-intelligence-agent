@@ -8,6 +8,10 @@ import simpleGit from "simple-git";
 import fs from "fs/promises";
 import path from "path";
 import os from "os";
+import { exec } from "child_process";
+import { promisify } from "util";
+
+const execAsync = promisify(exec);
 
 function getLabPath(repoPath?: string): string {
   if (repoPath) {
@@ -31,6 +35,8 @@ interface LabRequest {
   notes?: string;
   apiKey?: string;
   repoPath?: string;
+  githubUsername?: string;
+  githubToken?: string;
 }
 
 export const POST: APIRoute = async ({ request }) => {
@@ -46,11 +52,21 @@ export const POST: APIRoute = async ({ request }) => {
 
       try {
         const data = (await request.json()) as LabRequest;
-        const { repoUrl, branch, notes, repoPath } = data;
+        const {
+          repoUrl,
+          branch,
+          notes,
+          repoPath,
+          githubUsername,
+          githubToken,
+        } = data;
         let { courseId, courseName, institution, year, tags } = data;
         const apiKey = data.apiKey || process.env.OPENAI_API_KEY;
         const courseLabPath = getLabPath(repoPath);
         const coursesJsonPath = getCoursesJsonPath(repoPath);
+
+        const hasGitHub = !!(githubUsername && githubToken && repoPath);
+        const totalSteps = hasGitHub ? 8 : 6;
 
         if (!apiKey) {
           log(
@@ -65,7 +81,7 @@ export const POST: APIRoute = async ({ request }) => {
         tempDir = path.join(os.tmpdir(), `lab-${tempId}`);
         await fs.mkdir(tempDir, { recursive: true });
 
-        log(`[1/6] Cloning repository: ${repoUrl}`);
+        log(`[1/${totalSteps}] Cloning repository: ${repoUrl}`);
         log(`  -> Target: ${tempDir}`);
 
         const git = simpleGit();
@@ -77,7 +93,7 @@ export const POST: APIRoute = async ({ request }) => {
         await git.clone(repoUrl, tempDir, cloneOptions);
         log(`  -> Clone complete`);
 
-        log(`[2/6] Analyzing repository with AI agent...`);
+        log(`[2/${totalSteps}] Analyzing repository with AI agent...`);
 
         const analysis = await analyzeLabWithOpenAI(
           tempDir,
@@ -104,12 +120,12 @@ export const POST: APIRoute = async ({ request }) => {
         log(`  -> Year: ${year}`);
         log(`  -> Found ${analysis.tasks.length} task(s)`);
 
-        log(`[3/6] Creating course directory structure...`);
+        log(`[3/${totalSteps}] Creating course directory structure...`);
         log(`  -> Using repo path: ${courseLabPath}`);
         const courseDir = path.join(courseLabPath, courseId);
         await fs.mkdir(courseDir, { recursive: true });
 
-        log(`[4/6] Generating task files...`);
+        log(`[4/${totalSteps}] Generating task files...`);
 
         for (const task of analysis.tasks) {
           const taskDir = path.join(courseDir, task.task_id);
@@ -164,7 +180,7 @@ export const POST: APIRoute = async ({ request }) => {
           await copyStarterFiles(tempDir, taskDir, task.artifacts);
         }
 
-        log(`[5/6] Updating courses.json...`);
+        log(`[5/${totalSteps}] Updating courses.json...`);
         await updateCoursesJson(
           courseId,
           courseName,
@@ -174,20 +190,88 @@ export const POST: APIRoute = async ({ request }) => {
           coursesJsonPath,
         );
 
-        log(`[6/6] Cleaning up temporary files...`);
+        log(`[6/${totalSteps}] Cleaning up temporary files...`);
         await fs.rm(tempDir, { recursive: true, force: true });
         tempDir = null;
+
+        // GitHub integration: create branch and push commit
+        if (hasGitHub) {
+          // Generate branch name from course metadata
+          const coursePart = courseId.toLowerCase().replace(/\s+/g, "-");
+          const yearPart = year || new Date().getFullYear();
+          const branchName = `${coursePart}-${yearPart}-lab`;
+
+          const labTitle = courseName || courseId;
+          const remoteUrl = `https://${githubUsername}:${githubToken}@github.com/${githubUsername}/system-intelligence-benchmark.git`;
+
+          log(`[7/${totalSteps}] Creating git branch: ${branchName}`);
+          try {
+            // Ensure we're in the repo directory
+            process.chdir(repoPath);
+
+            // Fetch latest and create new branch from main
+            await execAsync(`git fetch origin main`);
+            await execAsync(`git checkout -b ${branchName} origin/main`);
+            log(`  -> Branch created: ${branchName}`);
+          } catch (error: unknown) {
+            const errorMsg =
+              error instanceof Error ? error.message : String(error);
+            // Branch might already exist, try to checkout
+            if (errorMsg.includes("already exists")) {
+              await execAsync(`git checkout ${branchName}`);
+              log(`  -> Branch already exists, checked out: ${branchName}`);
+            } else {
+              throw error;
+            }
+          }
+
+          log(`[8/${totalSteps}] Committing and pushing to GitHub...`);
+          try {
+            // Stage the new course directory
+            await execAsync(`git add "${courseDir}"`);
+
+            // Also stage courses.json update
+            await execAsync(`git add "${coursesJsonPath}"`);
+
+            // Commit with descriptive message
+            await execAsync(`git commit -m "add \\"${labTitle}\\" lab"`);
+            log(`  -> Committed: add "${labTitle}" lab`);
+
+            // Push to remote
+            await execAsync(`git push "${remoteUrl}" ${branchName}`);
+            log(`  -> Pushed to origin/${branchName}`);
+
+            // Switch back to main
+            await execAsync(`git checkout main`);
+          } catch (error: unknown) {
+            const errorMsg =
+              error instanceof Error ? error.message : String(error);
+            log(`  -> Git error: ${errorMsg}`);
+            // Try to recover by switching back to main
+            try {
+              await execAsync(`git checkout main`);
+            } catch {
+              // Ignore recovery errors
+            }
+            throw new Error(`Failed to push to GitHub: ${errorMsg}`);
+          }
+        }
 
         log(`\n=== SUCCESS ===`);
         log(`Lab added to: ${courseDir}`);
         log(
           `Tasks created: ${analysis.tasks.map((t) => t.task_id).join(", ")}`,
         );
+        if (hasGitHub) {
+          log(`\nGitHub: Changes pushed to branch, ready for PR`);
+        }
         log(`\nNext steps:`);
         log(`1. Review the generated files in ${courseDir}`);
         log(`2. Test the evaluation scripts`);
         log(`3. Adjust Docker images and commands as needed`);
-        log(`4. Commit your changes to the repository`);
+        if (!hasGitHub) {
+          log(`4. Commit your changes to the repository`);
+        }
 
         controller.close();
       } catch (error) {

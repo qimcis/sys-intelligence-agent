@@ -86,9 +86,11 @@ import Layout from '../layouts/Layout.astro';
       processStatus.textContent = 'Cloning repository and analyzing...';
       processLog.textContent = '';
 
-      // Get API key and repo path
+      // Get API key, repo path, and GitHub credentials
       const apiKey = sessionStorage.getItem('openai_api_key') || '';
       const repoPath = sessionStorage.getItem('benchmark_repo_path') || '';
+      const githubUsername = sessionStorage.getItem('github_username') || '';
+      const githubToken = sessionStorage.getItem('github_token') || '';
 
       try {
         const response = await fetch('/api/labs/process', {
@@ -106,7 +108,9 @@ import Layout from '../layouts/Layout.astro';
             tags: tags ? tags.split(',').map(t => t.trim()).filter(t => t) : undefined,
             notes: notes || undefined,
             apiKey,
-            repoPath
+            repoPath,
+            githubUsername: githubUsername || undefined,
+            githubToken: githubToken || undefined
           })
         });
 

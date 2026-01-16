@@ -4,6 +4,10 @@ import { callOpenAI, MODELS } from "../../../lib/openai-client";
 import { COURSEEXAM_PATH } from "../../../lib/config";
 import fs from "fs/promises";
 import path from "path";
+import { exec } from "child_process";
+import { promisify } from "util";
+
+const execAsync = promisify(exec);
 
 const JUDGE_SYSTEM_PROMPT = `You are a meticulous judge that validates and corrects exam markdown files for the CourseExam benchmark.
 
@@ -130,6 +134,11 @@ export const POST: APIRoute = async ({ request }) => {
         const apiKey =
           (formData.get("apiKey") as string) || process.env.OPENAI_API_KEY;
         const repoPath = formData.get("repoPath") as string;
+        const githubUsername = formData.get("githubUsername") as string;
+        const githubToken = formData.get("githubToken") as string;
+
+        const hasGitHub = !!(githubUsername && githubToken && repoPath);
+        const totalSteps = hasGitHub ? 8 : 6;
 
         if (!apiKey) {
           log(
@@ -139,15 +148,21 @@ export const POST: APIRoute = async ({ request }) => {
           return;
         }
 
-        log(`[1/6] Extracting text from exam file: ${examFile.name}`);
+        log(
+          `[1/${totalSteps}] Extracting text from exam file: ${examFile.name}`,
+        );
         const examText = await extractTextFromFile(examFile);
         log(`  -> Extracted ${examText.length} characters`);
 
-        log(`[2/6] Extracting text from solutions file: ${solutionsFile.name}`);
+        log(
+          `[2/${totalSteps}] Extracting text from solutions file: ${solutionsFile.name}`,
+        );
         const solutionsText = await extractTextFromFile(solutionsFile);
         log(`  -> Extracted ${solutionsText.length} characters`);
 
-        log(`[3/6] Generating structured exam.md...`);
+        log(
+          `[3/${totalSteps}] Generating structured exam.md (${MODELS.generator})...`,
+        );
 
         // Build metadata overrides section - only include fields that were provided
         const overrides: string[] = [];
@@ -189,7 +204,7 @@ Please generate the exam.md file following the exact format specified. Remember 
         log(`  -> Generated ${generatedExamMd.length} characters`);
 
         log(
-          `[4/6] Validating and correcting with judge model (${MODELS.judge})...`,
+          `[4/${totalSteps}] Validating and correcting with judge model (${MODELS.judge})...`,
         );
 
         const examMd = await callOpenAI(
@@ -222,18 +237,26 @@ Please generate the exam.md file following the exact format specified. Remember 
         }
 
         const courseExamPath = getExamPath(repoPath);
-        log(`[5/6] Creating exam directory: ${finalExamId}`);
+        log(`[5/${totalSteps}] Creating exam directory: ${finalExamId}`);
         log(`  -> Using repo path: ${courseExamPath}`);
         const examDir = path.join(courseExamPath, finalExamId);
         await fs.mkdir(examDir, { recursive: true });
 
-        log(`[6/6] Writing exam.md to ${examDir}/exam.md`);
+        log(`[6/${totalSteps}] Writing files to ${examDir}/`);
+
+        // Write exam.md
         await fs.writeFile(path.join(examDir, "exam.md"), examMd, "utf-8");
+        log(`  -> exam.md`);
+
+        // Write the solutions file (following benchmark convention)
+        const solutionsPath = path.join(examDir, solutionsFile.name);
+        const solutionsContent = Buffer.from(await solutionsFile.arrayBuffer());
+        await fs.writeFile(solutionsPath, solutionsContent);
+        log(`  -> ${solutionsFile.name}`);
 
         // Handle reference files
         const referenceFiles = formData.getAll("referenceFiles") as File[];
         if (referenceFiles.length > 0) {
-          log(`[+] Writing ${referenceFiles.length} reference file(s)...`);
           for (const refFile of referenceFiles) {
             const refPath = path.join(examDir, refFile.name);
             const refContent = Buffer.from(await refFile.arrayBuffer());
@@ -242,14 +265,125 @@ Please generate the exam.md file following the exact format specified. Remember 
           }
         }
 
+        // GitHub integration: create branch and push commit
+        if (hasGitHub) {
+          // Extract exam info for branch name
+          const examNameMatch = examMd.match(
+            /"test_paper_name"\s*:\s*"([^"]+)"/,
+          );
+          const courseMatch = examMd.match(/"course"\s*:\s*"([^"]+)"/);
+          const yearMatch = examMd.match(/"year"\s*:\s*(\d+)/);
+
+          // Generate branch name from exam metadata
+          let branchName = finalExamId.replace(/_/g, "-");
+          if (
+            !branchName ||
+            branchName === `exam-${Date.now()}`.replace(/_/g, "-")
+          ) {
+            // Fallback: build from extracted metadata
+            const coursePart = courseMatch
+              ? courseMatch[1].toLowerCase().replace(/\s+/g, "")
+              : "exam";
+            const yearPart = yearMatch
+              ? yearMatch[1]
+              : new Date().getFullYear();
+            const typePart = finalExamId.includes("final")
+              ? "final"
+              : finalExamId.includes("midterm")
+                ? "midterm"
+                : "exam";
+            branchName = `${coursePart}-${yearPart}-${typePart}`;
+          }
+
+          const examTitle = examNameMatch ? examNameMatch[1] : finalExamId;
+          const remoteUrl = `https://${githubUsername}:${githubToken}@github.com/${githubUsername}/system-intelligence-benchmark.git`;
+
+          // Use -C flag to run git commands in the repo directory without changing process cwd
+          // This allows parallel execution without conflicts
+          const git = (cmd: string) => execAsync(`git -C "${repoPath}" ${cmd}`);
+
+          log(`[7/${totalSteps}] Creating git branch: ${branchName}`);
+          try {
+            // Fetch latest from origin
+            await git(`fetch origin main`);
+
+            // Create the branch pointing to origin/main
+            try {
+              await git(`branch ${branchName} origin/main`);
+              log(`  -> Branch created: ${branchName}`);
+            } catch (error: unknown) {
+              const errorMsg =
+                error instanceof Error ? error.message : String(error);
+              if (errorMsg.includes("already exists")) {
+                log(`  -> Branch already exists: ${branchName}`);
+              } else {
+                throw error;
+              }
+            }
+          } catch (error: unknown) {
+            const errorMsg =
+              error instanceof Error ? error.message : String(error);
+            throw new Error(`Failed to create branch: ${errorMsg}`);
+          }
+
+          log(`[8/${totalSteps}] Committing and pushing to GitHub...`);
+          try {
+            // Stage the new exam directory relative to repo
+            const relativeExamDir = path.relative(repoPath, examDir);
+            await git(`add "${relativeExamDir}"`);
+
+            // Create a tree object from the staged content
+            const { stdout: treeHash } = await git(`write-tree`);
+            const tree = treeHash.trim();
+
+            // Get the commit hash of the branch
+            const { stdout: parentHash } = await git(`rev-parse ${branchName}`);
+            const parent = parentHash.trim();
+
+            // Create the commit
+            const commitMsg = `add "${examTitle}"`;
+            const { stdout: commitHash } = await git(
+              `commit-tree ${tree} -p ${parent} -m "${commitMsg}"`,
+            );
+            const commit = commitHash.trim();
+
+            // Update the branch to point to the new commit
+            await git(`update-ref refs/heads/${branchName} ${commit}`);
+            log(`  -> Committed: ${commitMsg}`);
+
+            // Push to remote
+            await git(`push "${remoteUrl}" ${branchName}`);
+            log(`  -> Pushed to origin/${branchName}`);
+
+            // Reset the index to match HEAD (main)
+            await git(`reset HEAD`);
+          } catch (error: unknown) {
+            const errorMsg =
+              error instanceof Error ? error.message : String(error);
+            log(`  -> Git error: ${errorMsg}`);
+            // Try to reset index
+            try {
+              await git(`reset HEAD`);
+            } catch {
+              // Ignore reset errors
+            }
+            throw new Error(`Failed to push to GitHub: ${errorMsg}`);
+          }
+        }
+
         log(`\n=== SUCCESS ===`);
         log(`Exam added to: ${examDir}`);
+        if (hasGitHub) {
+          log(`\nGitHub: Changes pushed to branch, ready for PR`);
+        }
         log(`\nNext steps:`);
         log(`1. Review the generated exam.md file`);
         log(
           `2. Run 'python prepare_dataset.py' in the courseexam_bench directory to regenerate the dataset`,
         );
-        log(`3. Commit your changes to the repository`);
+        if (!hasGitHub) {
+          log(`3. Commit your changes to the repository`);
+        }
 
         controller.close();
       } catch (error) {
