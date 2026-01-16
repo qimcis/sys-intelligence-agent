@@ -20,7 +20,7 @@ const { title } = Astro.props;
         margin: 0;
         padding: 0;
       }
-      
+
       :root {
         --bg: #0a0a0a;
         --fg: #fafafa;
@@ -30,7 +30,7 @@ const { title } = Astro.props;
         --success: #22c55e;
         --error: #ef4444;
       }
-      
+
       body {
         font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
         background: var(--bg);
@@ -38,31 +38,31 @@ const { title } = Astro.props;
         min-height: 100vh;
         line-height: 1.6;
       }
-      
+
       .container {
         max-width: 800px;
         margin: 0 auto;
         padding: 2rem;
       }
-      
+
       header {
         border-bottom: 1px solid var(--border);
         padding-bottom: 1.5rem;
         margin-bottom: 2rem;
       }
-      
+
       h1 {
         font-size: 1.5rem;
         font-weight: 600;
         letter-spacing: -0.025em;
       }
-      
+
       nav {
         display: flex;
         gap: 1rem;
         margin-top: 1rem;
       }
-      
+
       nav a {
         color: var(--muted);
         text-decoration: none;
@@ -71,19 +71,19 @@ const { title } = Astro.props;
         font-size: 0.875rem;
         transition: all 0.15s;
       }
-      
+
       nav a:hover,
       nav a.active {
         color: var(--fg);
         border-color: var(--fg);
       }
-      
+
       .block {
         border: 1px solid var(--border);
         padding: 1.5rem;
         margin-bottom: 1.5rem;
       }
-      
+
       .block-header {
         font-size: 0.875rem;
         color: var(--muted);
@@ -93,7 +93,7 @@ const { title } = Astro.props;
         padding-bottom: 0.5rem;
         border-bottom: 1px solid var(--border);
       }
-      
+
       label {
         display: block;
         font-size: 0.75rem;
@@ -102,7 +102,7 @@ const { title } = Astro.props;
         letter-spacing: 0.05em;
         margin-bottom: 0.5rem;
       }
-      
+
       input[type="text"],
       input[type="number"],
       input[type="url"],
@@ -117,19 +117,19 @@ const { title } = Astro.props;
         font-size: 0.875rem;
         margin-bottom: 1rem;
       }
-      
+
       input:focus,
       textarea:focus,
       select:focus {
         outline: none;
         border-color: var(--accent);
       }
-      
+
       textarea {
         min-height: 100px;
         resize: vertical;
       }
-      
+
       button {
         background: var(--fg);
         color: var(--bg);
@@ -140,16 +140,16 @@ const { title } = Astro.props;
         cursor: pointer;
         transition: opacity 0.15s;
       }
-      
+
       button:hover {
         opacity: 0.9;
       }
-      
+
       button:disabled {
         opacity: 0.5;
         cursor: not-allowed;
       }
-      
+
       .file-input {
         border: 1px dashed var(--border);
         padding: 2rem;
@@ -158,53 +158,53 @@ const { title } = Astro.props;
         transition: border-color 0.15s;
         margin-bottom: 1rem;
       }
-      
+
       .file-input:hover {
         border-color: var(--muted);
       }
-      
+
       .file-input input {
         display: none;
       }
-      
+
       .file-input.has-file {
         border-color: var(--success);
         border-style: solid;
       }
-      
+
       .file-name {
         font-size: 0.875rem;
         color: var(--success);
         margin-top: 0.5rem;
       }
-      
+
       .row {
         display: grid;
         grid-template-columns: 1fr 1fr;
         gap: 1rem;
       }
-      
+
       .status {
         padding: 1rem;
         margin-top: 1rem;
         font-size: 0.875rem;
       }
-      
+
       .status.success {
         border: 1px solid var(--success);
         color: var(--success);
       }
-      
+
       .status.error {
         border: 1px solid var(--error);
         color: var(--error);
       }
-      
+
       .status.loading {
         border: 1px solid var(--accent);
         color: var(--accent);
       }
-      
+
       .log {
         background: #111;
         border: 1px solid var(--border);
@@ -214,6 +214,57 @@ const { title } = Astro.props;
         overflow-y: auto;
         white-space: pre-wrap;
         margin-top: 1rem;
+      }
+
+      .metadata-dropdown {
+        width: 100%;
+      }
+
+      .metadata-dropdown summary {
+        cursor: pointer;
+        list-style: none;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+
+      .metadata-dropdown summary::-webkit-details-marker {
+        display: none;
+      }
+
+      .metadata-dropdown summary::after {
+        content: '+';
+        font-size: 1rem;
+        color: var(--muted);
+        transition: transform 0.2s;
+      }
+
+      .metadata-dropdown[open] summary::after {
+        content: '-';
+      }
+
+      .block-header.clickable {
+        margin-bottom: 0;
+        border-bottom: none;
+        padding-bottom: 0;
+      }
+
+      .metadata-dropdown[open] .block-header.clickable {
+        margin-bottom: 1rem;
+        border-bottom: 1px solid var(--border);
+        padding-bottom: 0.5rem;
+      }
+
+      .dropdown-hint {
+        font-size: 0.7rem;
+        color: var(--muted);
+        text-transform: none;
+        letter-spacing: normal;
+        font-style: italic;
+      }
+
+      .metadata-content {
+        padding-top: 1rem;
       }
     </style>
   </head>

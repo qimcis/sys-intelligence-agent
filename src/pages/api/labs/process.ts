@@ -6,6 +6,17 @@ import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
 
+function getLabPath(repoPath?: string): string {
+  if (repoPath) {
+    return path.join(repoPath, 'benchmarks', 'courselab_bench', 'data');
+  }
+  return COURSELAB_PATH;
+}
+
+function getCoursesJsonPath(repoPath?: string): string {
+  return path.join(getLabPath(repoPath), 'courses.json');
+}
+
 interface LabRequest {
   repoUrl: string;
   branch?: string;
@@ -16,6 +27,7 @@ interface LabRequest {
   tags: string[];
   notes: string;
   apiKey?: string;
+  repoPath?: string;
 }
 
 export const POST: APIRoute = async ({ request }) => {
@@ -31,8 +43,10 @@ export const POST: APIRoute = async ({ request }) => {
       
       try {
         const data = await request.json() as LabRequest;
-        const { repoUrl, branch, courseId, courseName, institution, year, tags, notes } = data;
+        const { repoUrl, branch, courseId, courseName, institution, year, tags, notes, repoPath } = data;
         const apiKey = data.apiKey || process.env.OPENAI_API_KEY;
+        const courseLabPath = getLabPath(repoPath);
+        const coursesJsonPath = getCoursesJsonPath(repoPath);
         
         if (!apiKey) {
           log('ERROR: No OpenAI API key provided. Set OPENAI_API_KEY environment variable or enter it in the UI.');
@@ -73,7 +87,8 @@ export const POST: APIRoute = async ({ request }) => {
         log(`  -> Found ${analysis.tasks.length} task(s)`);
         
         log(`[3/6] Creating course directory structure...`);
-        const courseDir = path.join(COURSELAB_PATH, courseId);
+        log(`  -> Using repo path: ${courseLabPath}`);
+        const courseDir = path.join(courseLabPath, courseId);
         await fs.mkdir(courseDir, { recursive: true });
         
         log(`[4/6] Generating task files...`);
@@ -128,7 +143,7 @@ export const POST: APIRoute = async ({ request }) => {
         }
         
         log(`[5/6] Updating courses.json...`);
-        await updateCoursesJson(courseId, courseName, institution, year, analysis.tasks.length);
+        await updateCoursesJson(courseId, courseName, institution, year, analysis.tasks.length, coursesJsonPath);
         
         log(`[6/6] Cleaning up temporary files...`);
         await fs.rm(tempDir, { recursive: true, force: true });
@@ -277,7 +292,8 @@ async function updateCoursesJson(
   courseName: string,
   institution: string,
   year: number,
-  numTasks: number
+  numTasks: number,
+  coursesJsonPath: string
 ): Promise<void> {
   let coursesData: { courses: Array<{
     course_id: string;
@@ -286,17 +302,17 @@ async function updateCoursesJson(
     year: number;
     num_tasks: number;
   }> } = { courses: [] };
-  
+
   try {
-    const existing = await fs.readFile(COURSELAB_COURSES_JSON, 'utf-8');
+    const existing = await fs.readFile(coursesJsonPath, 'utf-8');
     coursesData = JSON.parse(existing);
   } catch {
     // File doesn't exist or is invalid, start fresh
   }
-  
+
   // Check if course already exists
   const existingIndex = coursesData.courses.findIndex(c => c.course_id === courseId);
-  
+
   const courseEntry = {
     course_id: courseId,
     name: courseName,
@@ -304,12 +320,12 @@ async function updateCoursesJson(
     year,
     num_tasks: numTasks
   };
-  
+
   if (existingIndex >= 0) {
     coursesData.courses[existingIndex] = courseEntry;
   } else {
     coursesData.courses.push(courseEntry);
   }
-  
-  await fs.writeFile(COURSELAB_COURSES_JSON, JSON.stringify(coursesData, null, 2));
+
+  await fs.writeFile(coursesJsonPath, JSON.stringify(coursesData, null, 2));
 }

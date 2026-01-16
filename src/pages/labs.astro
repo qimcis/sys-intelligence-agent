@@ -79,9 +79,10 @@ import Layout from '../layouts/Layout.astro';
       processStatus.textContent = 'Cloning repository and analyzing...';
       processLog.textContent = '';
       
-      // Get API key
+      // Get API key and repo path
       const apiKey = sessionStorage.getItem('openai_api_key') || '';
-      
+      const repoPath = sessionStorage.getItem('benchmark_repo_path') || '';
+
       try {
         const response = await fetch('/api/labs/process', {
           method: 'POST',
@@ -97,7 +98,8 @@ import Layout from '../layouts/Layout.astro';
             year: parseInt(year),
             tags: tags.split(',').map(t => t.trim()).filter(t => t),
             notes,
-            apiKey
+            apiKey,
+            repoPath
           })
         });
         

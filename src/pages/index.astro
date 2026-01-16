@@ -31,34 +31,54 @@ import Layout from '../layouts/Layout.astro';
   <div class="block">
     <div class="block-header">Configuration</div>
     <p style="color: var(--muted); font-size: 0.75rem; margin-bottom: 1rem;">
-      Set your OpenAI API key via environment variable or enter it below.
+      Configure paths and API key for your local environment.
     </p>
+
+    <label for="repo-path">Benchmark Repository Path</label>
+    <input type="text" id="repo-path" placeholder="/path/to/system-intelligence-benchmark" />
+    <p style="color: var(--muted); font-size: 0.625rem; margin-top: 0.25rem; margin-bottom: 1rem;">
+      Local path to the cloned system-intelligence-benchmark repository
+    </p>
+
     <label for="api-key">OpenAI API Key</label>
     <input type="text" id="api-key" placeholder="sk-..." />
-    <button id="save-key">Save to Session</button>
-    <div id="key-status" class="status" style="display: none;"></div>
+
+    <button id="save-config">Save Configuration</button>
+    <div id="config-status" class="status" style="display: none;"></div>
   </div>
-  
+
   <script>
+    const repoPathInput = document.getElementById('repo-path') as HTMLInputElement;
     const keyInput = document.getElementById('api-key') as HTMLInputElement;
-    const saveBtn = document.getElementById('save-key');
-    const keyStatus = document.getElementById('key-status');
-    
-    // Load saved key
+    const saveBtn = document.getElementById('save-config');
+    const configStatus = document.getElementById('config-status');
+
+    // Load saved config
+    const savedRepoPath = sessionStorage.getItem('benchmark_repo_path');
     const savedKey = sessionStorage.getItem('openai_api_key');
+
+    if (savedRepoPath) {
+      repoPathInput.value = savedRepoPath;
+    }
     if (savedKey) {
       keyInput.value = savedKey;
     }
-    
+
     saveBtn?.addEventListener('click', () => {
+      const repoPath = repoPathInput.value.trim();
       const key = keyInput.value.trim();
+
+      if (repoPath) {
+        sessionStorage.setItem('benchmark_repo_path', repoPath);
+      }
       if (key) {
         sessionStorage.setItem('openai_api_key', key);
-        if (keyStatus) {
-          keyStatus.style.display = 'block';
-          keyStatus.className = 'status success';
-          keyStatus.textContent = 'API key saved to session storage';
-        }
+      }
+
+      if (configStatus && (repoPath || key)) {
+        configStatus.style.display = 'block';
+        configStatus.className = 'status success';
+        configStatus.textContent = 'Configuration saved to session storage';
       }
     });
   </script>
