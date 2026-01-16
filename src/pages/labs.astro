@@ -7,56 +7,63 @@ import Layout from '../layouts/Layout.astro';
     <div class="block-header">Lab Source</div>
     <label for="repo-url">GitHub Repository URL</label>
     <input type="url" id="repo-url" placeholder="https://github.com/username/lab-repo" />
-    
+
     <label for="branch">Branch (optional)</label>
     <input type="text" id="branch" placeholder="main" />
   </div>
-  
+
   <div class="block">
-    <div class="block-header">Course Metadata</div>
-    <div class="row">
-      <div>
-        <label for="course-id">Course ID (unique, lowercase, underscores)</label>
-        <input type="text" id="course-id" placeholder="mit_6_5840_2024" />
+    <details class="metadata-dropdown">
+      <summary class="block-header clickable">
+        Metadata Overrides (Optional)
+        <span class="dropdown-hint">Auto-generated from repository if not specified</span>
+      </summary>
+      <div class="metadata-content">
+        <div class="row">
+          <div>
+            <label for="course-id">Course ID (unique, lowercase, underscores)</label>
+            <input type="text" id="course-id" placeholder="Auto-generated" />
+          </div>
+          <div>
+            <label for="course-name">Course Name</label>
+            <input type="text" id="course-name" placeholder="Auto-generated" />
+          </div>
+        </div>
+        <div class="row">
+          <div>
+            <label for="institution">Institution</label>
+            <input type="text" id="institution" placeholder="Auto-generated" />
+          </div>
+          <div>
+            <label for="year">Year</label>
+            <input type="number" id="year" placeholder="Auto-generated" />
+          </div>
+        </div>
+        <label for="tags">Default Tags (comma-separated)</label>
+        <input type="text" id="tags" placeholder="Auto-generated" />
       </div>
-      <div>
-        <label for="course-name">Course Name</label>
-        <input type="text" id="course-name" placeholder="MIT 6.5840: Distributed Systems" />
-      </div>
-    </div>
-    <div class="row">
-      <div>
-        <label for="institution">Institution</label>
-        <input type="text" id="institution" placeholder="MIT" />
-      </div>
-      <div>
-        <label for="year">Year</label>
-        <input type="number" id="year" placeholder="2024" />
-      </div>
-    </div>
-    <label for="tags">Default Tags (comma-separated)</label>
-    <input type="text" id="tags" placeholder="distributed-systems, go, consensus" />
+    </details>
   </div>
-  
+
   <div class="block">
     <div class="block-header">Additional Context</div>
     <label for="notes">Notes for AI Agent</label>
     <textarea id="notes" placeholder="Any specific instructions or context for the AI agent analyzing the lab (e.g., 'Focus on the raft/ directory', 'Tests are in test_test.go', 'Use Go 1.21')"></textarea>
   </div>
-  
+
   <button id="process-btn" style="width: 100%;">Clone and Analyze Lab</button>
-  
+
   <div id="status-area" style="display: none;">
     <div id="process-status" class="status loading">Processing...</div>
     <div id="process-log" class="log"></div>
   </div>
-  
+
   <script>
     const processBtn = document.getElementById('process-btn') as HTMLButtonElement;
     const statusArea = document.getElementById('status-area')!;
     const processStatus = document.getElementById('process-status')!;
     const processLog = document.getElementById('process-log')!;
-    
+
     processBtn.addEventListener('click', async () => {
       const repoUrl = (document.getElementById('repo-url') as HTMLInputElement).value.trim();
       const branch = (document.getElementById('branch') as HTMLInputElement).value.trim();
@@ -66,19 +73,19 @@ import Layout from '../layouts/Layout.astro';
       const year = (document.getElementById('year') as HTMLInputElement).value.trim();
       const tags = (document.getElementById('tags') as HTMLInputElement).value.trim();
       const notes = (document.getElementById('notes') as HTMLTextAreaElement).value.trim();
-      
-      // Validation
-      if (!repoUrl || !courseId || !courseName || !institution || !year) {
-        alert('Please fill in all required fields.');
+
+      // Validation - only repo URL is required, metadata is auto-generated
+      if (!repoUrl) {
+        alert('Please enter a GitHub repository URL.');
         return;
       }
-      
+
       processBtn.disabled = true;
       statusArea.style.display = 'block';
       processStatus.className = 'status loading';
       processStatus.textContent = 'Cloning repository and analyzing...';
       processLog.textContent = '';
-      
+
       // Get API key and repo path
       const apiKey = sessionStorage.getItem('openai_api_key') || '';
       const repoPath = sessionStorage.getItem('benchmark_repo_path') || '';
@@ -91,21 +98,21 @@ import Layout from '../layouts/Layout.astro';
           },
           body: JSON.stringify({
             repoUrl,
-            branch,
-            courseId,
-            courseName,
-            institution,
-            year: parseInt(year),
-            tags: tags.split(',').map(t => t.trim()).filter(t => t),
-            notes,
+            branch: branch || undefined,
+            courseId: courseId || undefined,
+            courseName: courseName || undefined,
+            institution: institution || undefined,
+            year: year ? parseInt(year) : undefined,
+            tags: tags ? tags.split(',').map(t => t.trim()).filter(t => t) : undefined,
+            notes: notes || undefined,
             apiKey,
             repoPath
           })
         });
-        
+
         const reader = response.body?.getReader();
         const decoder = new TextDecoder();
-        
+
         if (reader) {
           while (true) {
             const { done, value } = await reader.read();
@@ -115,7 +122,7 @@ import Layout from '../layouts/Layout.astro';
             processLog.scrollTop = processLog.scrollHeight;
           }
         }
-        
+
         if (response.ok) {
           processStatus.className = 'status success';
           processStatus.textContent = 'Lab processed successfully!';
@@ -127,7 +134,7 @@ import Layout from '../layouts/Layout.astro';
         processStatus.className = 'status error';
         processStatus.textContent = `Error: ${error}`;
       }
-      
+
       processBtn.disabled = false;
     });
   </script>

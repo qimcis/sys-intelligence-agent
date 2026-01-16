@@ -23,31 +23,47 @@ Your task is to produce a single exam.md file that follows this EXACT format:
 
 IMPORTANT: For any metadata fields not explicitly provided, you MUST infer them from the exam content:
 - exam_id: Generate from course code, semester, year, and exam type (e.g., "cs537_fall_2021_final"). Use lowercase with underscores.
-- test_paper_name: Create a human-readable title from the exam header/title
-- course: Extract the course name from the exam
-- institution: Look for university name in headers, footers, or letterhead
+- test_paper_name: Create a human-readable title from the exam header/title (should match the # header)
+- course: Extract the course code/number from the exam (e.g., "CS 537", "Operating Systems")
+- institution: Look for university name in headers, footers, or letterhead (use abbreviation like "UW-Madison", "MIT", "UIUC")
 - year: Extract from date on exam or filename
 - score_total: Sum up all question points, or use stated total
-- tags: Generate relevant topic tags based on the exam content
+- num_questions: Count the total number of questions
 
-1. Start with a JSON metadata block (no markdown code fence, just raw JSON):
+FORMAT SPECIFICATION:
+
+1. Start with a markdown header using the exam title:
+# {Exam Title}
+
+2. Immediately follow with a JSON metadata block inside a code fence:
+\`\`\`json
 {
-  "exam_id": "unique_exam_id",
-  "test_paper_name": "Human readable exam title",
-  "course": "Course name",
-  "institution": "University name",
-  "year": 2024,
+  "exam_id": "cs537_fall_2021_final",
+  "test_paper_name": "CS 537 Fall 2021 Final",
+  "course": "Operating Systems",
+  "institution": "University of Wisconsin-Madison",
+  "year": 2021,
   "score_total": 100,
-  "num_questions": 10
+  "num_questions": 55
 }
+\`\`\`
 
-2. Then for each question, use this format (separated by ---):
+3. Then for each question, use this format (separated by ---):
 
 ---
 
-## Question {number} [{points} points]
+
+## Question {number} [{points} point(s)]
 
 {Question text - convert any images to text descriptions if possible, otherwise note "[Figure excluded]"}
+
+For multiple choice, list options as:
+A) Option text
+B) Option text
+C) Option text
+D) Option text
+
+Your answer should be one letter only (A, B, C, D, or E).
 
 \`\`\`json
 {
@@ -55,22 +71,22 @@ IMPORTANT: For any metadata fields not explicitly provided, you MUST infer them 
   "points": {points},
   "type": "ExactMatch" or "Freeform",
   "tags": ["tag1", "tag2"],
-  "choices": ["A option", "B option", "C option", "D option"],  // Only for ExactMatch with choices
-  "answer": "The correct answer (letter A/B/C/D for choices, or full text for Freeform)",
-  "llm_judge_instructions": "Rubric for grading (required for Freeform)",
-  "comments": "Optional explanation"
+  "choices": ["option A text", "option B text", "option C text", "option D text"],
+  "answer": "B"
 }
 \`\`\`
 
 IMPORTANT RULES:
-- For multiple choice questions, use type "ExactMatch" and include "choices" array. Answer should be the letter (A, B, C, D).
+- The # header title and test_paper_name in metadata should match
+- For multiple choice questions, use type "ExactMatch" and include "choices" array. Answer should be the letter (A, B, C, D, E).
 - For True/False, use type "ExactMatch" with choices ["True", "False"]. Answer should be "A" for True, "B" for False.
 - For free-form/explanation questions, use type "Freeform" and include "llm_judge_instructions" with a detailed rubric.
-- For multi-select questions, use type "Freeform" since multiple answers are possible.
-- For multi-part questions (e.g., 5.1, 5.2), create separate question entries with sub-IDs.
+- For questions that reference materials (MPs, labs, etc.), add "reference_materials": ["MP1.md"] to indicate dependencies.
+- For multi-part questions (e.g., 12-13), you can combine them with a multi-part answer format.
 - Tags should be lowercase with hyphens (e.g., "operating-systems", "virtual-memory").
 - If a question relies on a figure/image that cannot be described in text, exclude it and update score_total accordingly.
 - The sum of all question points MUST equal score_total in the metadata.
+- Use "point" (singular) when points=1, "points" (plural) otherwise.
 
 Output ONLY the exam.md content, no other text.`;
 

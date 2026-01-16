@@ -1,5 +1,5 @@
-import { spawn } from 'child_process';
-import path from 'path';
+import { spawn } from "child_process";
+import path from "path";
 
 export interface OpenCodeRunOptions {
   message: string;
@@ -8,50 +8,52 @@ export interface OpenCodeRunOptions {
   onOutput?: (data: string) => void;
 }
 
-export async function runOpenCode(options: OpenCodeRunOptions): Promise<string> {
+export async function runOpenCode(
+  options: OpenCodeRunOptions,
+): Promise<string> {
   const { message, workingDir, model, onOutput } = options;
-  
+
   return new Promise((resolve, reject) => {
-    const args = ['run', message];
-    
+    const args = ["run", message];
+
     if (model) {
-      args.push('--model', model);
+      args.push("--model", model);
     }
-    
-    const proc = spawn('opencode', args, {
+
+    const proc = spawn("opencode", args, {
       cwd: workingDir,
       env: {
         ...process.env,
         // Disable interactive prompts
-        CI: 'true',
+        CI: "true",
       },
-      stdio: ['pipe', 'pipe', 'pipe']
+      stdio: ["pipe", "pipe", "pipe"],
     });
-    
-    let output = '';
-    let errorOutput = '';
-    
-    proc.stdout?.on('data', (chunk) => {
+
+    let output = "";
+    let errorOutput = "";
+
+    proc.stdout?.on("data", (chunk) => {
       const text = chunk.toString();
       output += text;
       onOutput?.(text);
     });
-    
-    proc.stderr?.on('data', (chunk) => {
+
+    proc.stderr?.on("data", (chunk) => {
       const text = chunk.toString();
       errorOutput += text;
       onOutput?.(text);
     });
-    
-    proc.on('close', (code) => {
+
+    proc.on("close", (code) => {
       if (code === 0) {
         resolve(output);
       } else {
         reject(new Error(`OpenCode exited with code ${code}: ${errorOutput}`));
       }
     });
-    
-    proc.on('error', (err) => {
+
+    proc.on("error", (err) => {
       reject(err);
     });
   });
@@ -60,66 +62,88 @@ export async function runOpenCode(options: OpenCodeRunOptions): Promise<string> 
 // Alternative: Use OpenAI directly for simpler agentic tasks
 export async function analyzeLabWithOpenAI(
   repoPath: string,
-  courseId: string,
-  courseName: string,
-  institution: string,
-  year: number,
-  tags: string[],
-  notes: string,
+  repoUrl: string,
+  courseId: string | undefined,
+  courseName: string | undefined,
+  institution: string | undefined,
+  year: number | undefined,
+  tags: string[] | undefined,
+  notes: string | undefined,
   apiKey: string,
-  onLog: (msg: string) => void
+  onLog: (msg: string) => void,
 ): Promise<LabAnalysisResult> {
-  const { callOpenAI } = await import('./openai-client');
-  const fs = await import('fs/promises');
-  
+  const { callOpenAI } = await import("./openai-client");
+  const fs = await import("fs/promises");
+
   // Read directory structure
-  onLog('Analyzing repository structure...');
+  onLog("Analyzing repository structure...");
   const structure = await getDirectoryStructure(repoPath, 3);
-  
+
   // Find key files
-  onLog('Identifying key files...');
+  onLog("Identifying key files...");
   const keyFiles = await findKeyFiles(repoPath);
-  
+
   // Read key file contents
   const fileContents: Record<string, string> = {};
-  for (const file of keyFiles.slice(0, 10)) { // Limit to 10 files
+  for (const file of keyFiles.slice(0, 10)) {
+    // Limit to 10 files
     try {
-      const content = await fs.readFile(path.join(repoPath, file), 'utf-8');
-      if (content.length < 50000) { // Skip very large files
+      const content = await fs.readFile(path.join(repoPath, file), "utf-8");
+      if (content.length < 50000) {
+        // Skip very large files
         fileContents[file] = content;
       }
     } catch {
       // Skip unreadable files
     }
   }
-  
-  onLog('Calling AI to analyze lab structure...');
-  
+
+  onLog("Calling AI to analyze lab structure...");
+
+  // Build metadata overrides section
+  const metadataOverrides: string[] = [];
+  if (courseId) metadataOverrides.push(`- Course ID: ${courseId}`);
+  if (courseName) metadataOverrides.push(`- Course Name: ${courseName}`);
+  if (institution) metadataOverrides.push(`- Institution: ${institution}`);
+  if (year) metadataOverrides.push(`- Year: ${year}`);
+  if (tags && tags.length > 0)
+    metadataOverrides.push(`- Tags: ${tags.join(", ")}`);
+
+  const metadataSection =
+    metadataOverrides.length > 0
+      ? `The following metadata was explicitly provided (use these values):\n${metadataOverrides.join("\n")}\n\nFor any fields NOT listed above, infer them from the repository content.`
+      : `No metadata was provided. Infer ALL course metadata from the repository URL and content.`;
+
   const analysisPrompt = `You are analyzing a programming lab repository to create a courselab benchmark entry.
+
+Repository URL: ${repoUrl}
 
 Repository structure:
 ${structure}
 
 Key files found:
-${keyFiles.join('\n')}
+${keyFiles.join("\n")}
 
 File contents:
-${Object.entries(fileContents).map(([name, content]) => `=== ${name} ===\n${content.slice(0, 5000)}`).join('\n\n')}
+${Object.entries(fileContents)
+  .map(([name, content]) => `=== ${name} ===\n${content.slice(0, 5000)}`)
+  .join("\n\n")}
 
-Course metadata:
-- Course ID: ${courseId}
-- Course Name: ${courseName}
-- Institution: ${institution}
-- Year: ${year}
-- Tags: ${tags.join(', ')}
+${metadataSection}
 
-Additional notes: ${notes || 'None'}
+Additional notes: ${notes || "None"}
 
 Your task is to analyze this lab and generate the necessary files for the courselab benchmark format:
 
-1. Identify distinct tasks/assignments in the repository
-2. For each task, determine:
-   - Task ID (lowercase, underscores)
+1. FIRST, infer course metadata from the repository:
+   - course_id: Generate from course code and year (e.g., "mit_6_5840_2024"). Use lowercase with underscores.
+   - name: Human-readable course name (e.g., "MIT 6.5840: Distributed Systems")
+   - institution: Identify the university from repo URL, README, or content (e.g., "MIT", "Stanford", "CMU")
+   - year: Extract from repo name, README, or dates in content
+
+2. Identify distinct tasks/assignments in the repository
+3. For each task, determine:
+   - Task ID (lowercase, underscores, e.g., "task_1_mapreduce")
    - What files students need to modify (artifacts)
    - How to run tests/evaluation
    - What Docker image to use
@@ -127,21 +151,27 @@ Your task is to analyze this lab and generate the necessary files for the course
 
 Output a JSON object with this structure:
 {
+  "course_metadata": {
+    "course_id": "mit_6_5840_2024",
+    "name": "MIT 6.5840: Distributed Systems",
+    "institution": "MIT",
+    "year": 2024
+  },
   "tasks": [
     {
-      "task_id": "task_name",
+      "task_id": "task_1_mapreduce",
       "description": "Brief description of the task",
-      "artifacts": ["path/to/file1.go", "path/to/file2.go"],
+      "artifacts": ["src/mr/coordinator.go", "src/mr/worker.go"],
       "docker_image": "golang:1.21-bookworm",
       "working_dir": "/workspace",
       "evaluate_commands": ["go test -v ./..."],
       "preprocess_commands": ["optional setup commands"],
       "timeout_minutes": 30,
-      "tags": ["tag1", "tag2"]
+      "tags": ["distributed-systems", "mapreduce"]
     }
   ],
   "task_descriptions": {
-    "task_name": "Full markdown description of the task for task.md"
+    "task_1_mapreduce": "Full markdown description of the task for task.md"
   }
 }
 
@@ -155,12 +185,16 @@ Output ONLY valid JSON, no other text.`;
 
   const response = await callOpenAI(
     [
-      { role: 'system', content: 'You are an expert at analyzing programming lab repositories. Output only valid JSON.' },
-      { role: 'user', content: analysisPrompt }
+      {
+        role: "system",
+        content:
+          "You are an expert at analyzing programming lab repositories. Output only valid JSON.",
+      },
+      { role: "user", content: analysisPrompt },
     ],
-    apiKey
+    apiKey,
   );
-  
+
   // Parse the response
   try {
     // Extract JSON from response (handle markdown code blocks)
@@ -171,11 +205,19 @@ Output ONLY valid JSON, no other text.`;
     }
     return JSON.parse(jsonStr.trim());
   } catch (e) {
-    throw new Error(`Failed to parse AI response as JSON: ${e}\n\nResponse:\n${response}`);
+    throw new Error(
+      `Failed to parse AI response as JSON: ${e}\n\nResponse:\n${response}`,
+    );
   }
 }
 
 export interface LabAnalysisResult {
+  course_metadata: {
+    course_id: string;
+    name: string;
+    institution: string;
+    year: number;
+  };
   tasks: Array<{
     task_id: string;
     description: string;
@@ -190,27 +232,40 @@ export interface LabAnalysisResult {
   task_descriptions: Record<string, string>;
 }
 
-async function getDirectoryStructure(dir: string, maxDepth: number, currentDepth = 0, prefix = ''): Promise<string> {
-  const fs = await import('fs/promises');
-  
-  if (currentDepth >= maxDepth) return '';
-  
-  let result = '';
+async function getDirectoryStructure(
+  dir: string,
+  maxDepth: number,
+  currentDepth = 0,
+  prefix = "",
+): Promise<string> {
+  const fs = await import("fs/promises");
+
+  if (currentDepth >= maxDepth) return "";
+
+  let result = "";
   try {
     const entries = await fs.readdir(dir, { withFileTypes: true });
-    const filtered = entries.filter(e => 
-      !e.name.startsWith('.') && 
-      !['node_modules', 'vendor', '__pycache__', 'target', 'build', 'dist'].includes(e.name)
+    const filtered = entries.filter(
+      (e) =>
+        !e.name.startsWith(".") &&
+        ![
+          "node_modules",
+          "vendor",
+          "__pycache__",
+          "target",
+          "build",
+          "dist",
+        ].includes(e.name),
     );
-    
+
     for (const entry of filtered) {
-      result += `${prefix}${entry.isDirectory() ? '/' : ''}${entry.name}\n`;
+      result += `${prefix}${entry.isDirectory() ? "/" : ""}${entry.name}\n`;
       if (entry.isDirectory()) {
         result += await getDirectoryStructure(
           path.join(dir, entry.name),
           maxDepth,
           currentDepth + 1,
-          prefix + '  '
+          prefix + "  ",
         );
       }
     }
@@ -221,9 +276,9 @@ async function getDirectoryStructure(dir: string, maxDepth: number, currentDepth
 }
 
 async function findKeyFiles(dir: string): Promise<string[]> {
-  const fs = await import('fs/promises');
+  const fs = await import("fs/promises");
   const keyFiles: string[] = [];
-  
+
   const keyPatterns = [
     /readme\.md$/i,
     /makefile$/i,
@@ -242,23 +297,32 @@ async function findKeyFiles(dir: string): Promise<string[]> {
     /package\.json$/,
     /requirements\.txt$/,
   ];
-  
-  async function walk(currentDir: string, relativePath = '') {
+
+  async function walk(currentDir: string, relativePath = "") {
     try {
       const entries = await fs.readdir(currentDir, { withFileTypes: true });
       for (const entry of entries) {
-        if (entry.name.startsWith('.') || 
-            ['node_modules', 'vendor', '__pycache__', 'target', 'build', 'dist'].includes(entry.name)) {
+        if (
+          entry.name.startsWith(".") ||
+          [
+            "node_modules",
+            "vendor",
+            "__pycache__",
+            "target",
+            "build",
+            "dist",
+          ].includes(entry.name)
+        ) {
           continue;
         }
-        
+
         const fullPath = path.join(currentDir, entry.name);
         const relPath = path.join(relativePath, entry.name);
-        
+
         if (entry.isDirectory()) {
           await walk(fullPath, relPath);
         } else {
-          if (keyPatterns.some(p => p.test(entry.name))) {
+          if (keyPatterns.some((p) => p.test(entry.name))) {
             keyFiles.push(relPath);
           }
         }
@@ -267,7 +331,7 @@ async function findKeyFiles(dir: string): Promise<string[]> {
       // Ignore errors
     }
   }
-  
+
   await walk(dir);
   return keyFiles;
 }
