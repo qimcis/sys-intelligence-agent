@@ -1,9 +1,24 @@
 import type { APIRoute } from "astro";
 import { extractTextFromFile } from "../../../lib/pdf-utils";
-import { callOpenAI } from "../../../lib/openai-client";
+import { callOpenAI, MODELS } from "../../../lib/openai-client";
 import { COURSEEXAM_PATH } from "../../../lib/config";
 import fs from "fs/promises";
 import path from "path";
+
+const JUDGE_SYSTEM_PROMPT = `You are a meticulous judge that validates and corrects exam markdown files for the CourseExam benchmark.
+
+Your task is to review the generated exam.md content and fix any issues:
+
+1. VERIFY score_total: Sum up all the "points" values from each question's JSON block. The score_total in the metadata MUST equal this sum.
+2. VERIFY num_questions: Count the actual number of questions. The num_questions in metadata MUST match.
+3. CHECK format consistency: Ensure all questions follow the correct format.
+4. FIX any JSON syntax errors in the metadata or question blocks.
+5. ENSURE the # header matches test_paper_name in metadata.
+
+If you find errors, output the CORRECTED exam.md content.
+If everything is correct, output the original content unchanged.
+
+Output ONLY the exam.md content, no explanations or commentary.`;
 
 function getExamPath(repoPath?: string): string {
   if (repoPath) {
@@ -27,7 +42,7 @@ IMPORTANT: For any metadata fields not explicitly provided, you MUST infer them 
 - course: Extract the course code/number from the exam (e.g., "CS 537", "Operating Systems")
 - institution: Look for university name in headers, footers, or letterhead (use abbreviation like "UW-Madison", "MIT", "UIUC")
 - year: Extract from date on exam or filename
-- score_total: Sum up all question points, or use stated total
+- score_total: You MUST actually calculate this by summing all question points. Do NOT assume 100 or any other common value. Add up each question's points to get the true total.
 - num_questions: Count the total number of questions
 
 FORMAT SPECIFICATION:
@@ -85,7 +100,7 @@ IMPORTANT RULES:
 - For multi-part questions (e.g., 12-13), you can combine them with a multi-part answer format.
 - Tags should be lowercase with hyphens (e.g., "operating-systems", "virtual-memory").
 - If a question relies on a figure/image that cannot be described in text, exclude it and update score_total accordingly.
-- The sum of all question points MUST equal score_total in the metadata.
+- CRITICAL: The sum of all question points MUST equal score_total in the metadata. Actually add up the points - do not guess or assume 100.
 - Use "point" (singular) when points=1, "points" (plural) otherwise.
 
 Output ONLY the exam.md content, no other text.`;
@@ -124,15 +139,15 @@ export const POST: APIRoute = async ({ request }) => {
           return;
         }
 
-        log(`[1/5] Extracting text from exam file: ${examFile.name}`);
+        log(`[1/6] Extracting text from exam file: ${examFile.name}`);
         const examText = await extractTextFromFile(examFile);
         log(`  -> Extracted ${examText.length} characters`);
 
-        log(`[2/5] Extracting text from solutions file: ${solutionsFile.name}`);
+        log(`[2/6] Extracting text from solutions file: ${solutionsFile.name}`);
         const solutionsText = await extractTextFromFile(solutionsFile);
         log(`  -> Extracted ${solutionsText.length} characters`);
 
-        log(`[3/5] Calling OpenAI to generate structured exam.md...`);
+        log(`[3/6] Generating structured exam.md...`);
 
         // Build metadata overrides section - only include fields that were provided
         const overrides: string[] = [];
@@ -162,15 +177,34 @@ ${solutionsText}
 
 Please generate the exam.md file following the exact format specified. Remember to infer any metadata not explicitly provided above.`;
 
-        const examMd = await callOpenAI(
+        const generatedExamMd = await callOpenAI(
           [
             { role: "system", content: EXAM_SYSTEM_PROMPT },
             { role: "user", content: userPrompt },
           ],
           apiKey,
+          MODELS.generator,
         );
 
-        log(`  -> Generated ${examMd.length} characters of exam.md`);
+        log(`  -> Generated ${generatedExamMd.length} characters`);
+
+        log(
+          `[4/6] Validating and correcting with judge model (${MODELS.judge})...`,
+        );
+
+        const examMd = await callOpenAI(
+          [
+            { role: "system", content: JUDGE_SYSTEM_PROMPT },
+            {
+              role: "user",
+              content: `Please validate and correct the following exam.md content:\n\n${generatedExamMd}`,
+            },
+          ],
+          apiKey,
+          MODELS.judge,
+        );
+
+        log(`  -> Validated exam.md (${examMd.length} characters)`);
 
         // Extract exam_id from generated content if not provided
         let finalExamId = examId;
@@ -188,12 +222,12 @@ Please generate the exam.md file following the exact format specified. Remember 
         }
 
         const courseExamPath = getExamPath(repoPath);
-        log(`[4/5] Creating exam directory: ${finalExamId}`);
+        log(`[5/6] Creating exam directory: ${finalExamId}`);
         log(`  -> Using repo path: ${courseExamPath}`);
         const examDir = path.join(courseExamPath, finalExamId);
         await fs.mkdir(examDir, { recursive: true });
 
-        log(`[5/5] Writing exam.md to ${examDir}/exam.md`);
+        log(`[6/6] Writing exam.md to ${examDir}/exam.md`);
         await fs.writeFile(path.join(examDir, "exam.md"), examMd, "utf-8");
 
         // Handle reference files

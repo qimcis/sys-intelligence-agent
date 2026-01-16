@@ -1,5 +1,6 @@
 import { spawn } from "child_process";
 import path from "path";
+import { callOpenAI, MODELS } from "./openai-client";
 
 export interface OpenCodeRunOptions {
   message: string;
@@ -183,7 +184,8 @@ Be thorough in identifying all tasks. Look for:
 
 Output ONLY valid JSON, no other text.`;
 
-  const response = await callOpenAI(
+  onLog(`  -> Using generator model: ${MODELS.generator}`);
+  const generatedResponse = await callOpenAI(
     [
       {
         role: "system",
@@ -193,6 +195,37 @@ Output ONLY valid JSON, no other text.`;
       { role: "user", content: analysisPrompt },
     ],
     apiKey,
+    MODELS.generator,
+  );
+
+  onLog(`  -> Validating with judge model: ${MODELS.judge}`);
+  const judgePrompt = `You are a meticulous judge that validates and corrects lab analysis JSON for the courselab benchmark.
+
+Review the following JSON output and fix any issues:
+1. Ensure course_metadata has all required fields (course_id, name, institution, year)
+2. Ensure each task has valid task_id, artifacts, docker_image, evaluate_commands
+3. Fix any JSON syntax errors
+4. Ensure task_ids are lowercase with underscores
+5. Verify artifacts paths look reasonable
+
+If you find errors, output the CORRECTED JSON.
+If everything is correct, output the original JSON unchanged.
+
+Output ONLY valid JSON, no explanations.
+
+JSON to validate:
+${generatedResponse}`;
+
+  const response = await callOpenAI(
+    [
+      {
+        role: "system",
+        content: "You are an expert JSON validator. Output only valid JSON.",
+      },
+      { role: "user", content: judgePrompt },
+    ],
+    apiKey,
+    MODELS.judge,
   );
 
   // Parse the response
