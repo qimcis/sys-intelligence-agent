@@ -41,7 +41,13 @@ You will receive:
 Your task is to produce a single exam.md file that follows this EXACT format:
 
 IMPORTANT: For any metadata fields not explicitly provided, you MUST infer them from the exam content:
-- exam_id: Generate from course code, semester, year, and exam type (e.g., "cs537_fall_2021_final"). Use lowercase with underscores.
+- exam_id: Generate from course code, semester, year, and exam type. Use lowercase with underscores.
+  CRITICAL: The exam type MUST be correct - look for "midterm", "mid-term", "mid", "final", "quiz", "exam" in the document title/header.
+  - If the document says "Midterm", "Mid-term", "Mid", or "Middle" → use "midterm" in the exam_id
+  - If the document says "Final" → use "final" in the exam_id
+  - NEVER confuse midterm with final! Read the actual document title carefully.
+  Examples: "cs537_fall_2021_midterm", "cs537_spring_2018_final", "cs162_fall_2023_quiz1"
+  DO NOT use "final" if the exam says "midterm" or vice versa! This is a critical error.
 - test_paper_name: Create a human-readable title from the exam header/title (should match the # header)
 - course: Extract the course code/number from the exam (e.g., "CS 537", "Operating Systems")
 - institution: Look for university name in headers, footers, or letterhead (use abbreviation like "UW-Madison", "MIT", "UIUC")
@@ -151,13 +157,13 @@ export const POST: APIRoute = async ({ request }) => {
         log(
           `[1/${totalSteps}] Extracting text from exam file: ${examFile.name}`,
         );
-        const examText = await extractTextFromFile(examFile);
+        const examText = await extractTextFromFile(examFile, apiKey);
         log(`  -> Extracted ${examText.length} characters`);
 
         log(
           `[2/${totalSteps}] Extracting text from solutions file: ${solutionsFile.name}`,
         );
-        const solutionsText = await extractTextFromFile(solutionsFile);
+        const solutionsText = await extractTextFromFile(solutionsFile, apiKey);
         log(`  -> Extracted ${solutionsText.length} characters`);
 
         log(
@@ -180,6 +186,13 @@ export const POST: APIRoute = async ({ request }) => {
             : `No metadata overrides were provided. Infer ALL metadata fields from the exam content.`;
 
         const userPrompt = `${overridesSection}
+
+IMPORTANT - Exam filename: "${examFile.name}"
+IMPORTANT - Solutions filename: "${solutionsFile.name}"
+The filename often contains critical hints about the exam type (midterm vs final), semester, and year. For example:
+- "21-fall-mid.pdf" → Fall 2021 Midterm (note: "mid" = midterm, NOT final)
+- "18-spring-final.pdf" → Spring 2018 Final
+Use these filename hints to help determine the correct exam_id.
 
 Additional notes from the uploader:
 ${notes || "None"}
@@ -240,6 +253,20 @@ Please generate the exam.md file following the exact format specified. Remember 
         log(`[5/${totalSteps}] Creating exam directory: ${finalExamId}`);
         log(`  -> Using repo path: ${courseExamPath}`);
         const examDir = path.join(courseExamPath, finalExamId);
+
+        // Check if exam already exists - never overwrite existing exams
+        try {
+          await fs.access(path.join(examDir, "exam.md"));
+          log(`\nERROR: Exam already exists at ${examDir}/exam.md`);
+          log(
+            `Refusing to overwrite existing exam. If you want to replace it, delete the directory first.`,
+          );
+          controller.close();
+          return;
+        } catch {
+          // File doesn't exist, safe to proceed
+        }
+
         await fs.mkdir(examDir, { recursive: true });
 
         log(`[6/${totalSteps}] Writing files to ${examDir}/`);
@@ -295,19 +322,28 @@ Please generate the exam.md file following the exact format specified. Remember 
             branchName = `${coursePart}-${yearPart}-${typePart}`;
           }
 
-          const examTitle = examNameMatch ? examNameMatch[1] : finalExamId;
+          // Sanitize exam title for commit message (remove special chars that break shell)
+          const examTitle = (examNameMatch ? examNameMatch[1] : finalExamId)
+            .replace(/[()]/g, "")
+            .replace(/"/g, "'");
           const remoteUrl = `https://${githubUsername}:${githubToken}@github.com/${githubUsername}/system-intelligence-benchmark.git`;
 
-          // Use -C flag to run git commands in the repo directory without changing process cwd
-          // This allows parallel execution without conflicts
+          // Use -C flag to run git commands in the repo directory
           const git = (cmd: string) => execAsync(`git -C "${repoPath}" ${cmd}`);
+
+          // Create a unique worktree for this parallel operation
+          const worktreeDir = path.join(
+            repoPath,
+            ".worktrees",
+            `exam-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          );
 
           log(`[7/${totalSteps}] Creating git branch: ${branchName}`);
           try {
             // Fetch latest from origin
             await git(`fetch origin main`);
 
-            // Create the branch pointing to origin/main
+            // Create the branch if it doesn't exist
             try {
               await git(`branch ${branchName} origin/main`);
               log(`  -> Branch created: ${branchName}`);
@@ -320,54 +356,67 @@ Please generate the exam.md file following the exact format specified. Remember 
                 throw error;
               }
             }
+
+            // Create a worktree for isolated operations
+            await fs.mkdir(path.dirname(worktreeDir), { recursive: true });
+            await git(`worktree add "${worktreeDir}" ${branchName}`);
           } catch (error: unknown) {
             const errorMsg =
               error instanceof Error ? error.message : String(error);
-            throw new Error(`Failed to create branch: ${errorMsg}`);
+            throw new Error(`Failed to create branch/worktree: ${errorMsg}`);
           }
 
           log(`[8/${totalSteps}] Committing and pushing to GitHub...`);
           try {
-            // Stage the new exam directory relative to repo
-            const relativeExamDir = path.relative(repoPath, examDir);
-            await git(`add "${relativeExamDir}"`);
-
-            // Create a tree object from the staged content
-            const { stdout: treeHash } = await git(`write-tree`);
-            const tree = treeHash.trim();
-
-            // Get the commit hash of the branch
-            const { stdout: parentHash } = await git(`rev-parse ${branchName}`);
-            const parent = parentHash.trim();
-
-            // Create the commit
-            const commitMsg = `add "${examTitle}"`;
-            const { stdout: commitHash } = await git(
-              `commit-tree ${tree} -p ${parent} -m "${commitMsg}"`,
+            // Copy exam files to the worktree
+            const worktreeExamDir = path.join(
+              worktreeDir,
+              "benchmarks",
+              "courseexam_bench",
+              "data",
+              "raw",
+              finalExamId,
             );
-            const commit = commitHash.trim();
+            await fs.mkdir(worktreeExamDir, { recursive: true });
 
-            // Update the branch to point to the new commit
-            await git(`update-ref refs/heads/${branchName} ${commit}`);
-            log(`  -> Committed: ${commitMsg}`);
+            // Copy all files from examDir to worktreeExamDir
+            const files = await fs.readdir(examDir);
+            for (const file of files) {
+              await fs.copyFile(
+                path.join(examDir, file),
+                path.join(worktreeExamDir, file),
+              );
+            }
 
-            // Push to remote
-            await git(`push "${remoteUrl}" ${branchName}`);
+            // Git operations in the worktree
+            const wtGit = (cmd: string) =>
+              execAsync(`git -C "${worktreeDir}" ${cmd}`);
+
+            // Stage, commit, and push
+            await wtGit(`add -A`);
+            await wtGit(`commit -m "add ${examTitle}"`);
+            log(`  -> Committed: add ${examTitle}`);
+
+            await wtGit(`push "${remoteUrl}" ${branchName}`);
             log(`  -> Pushed to origin/${branchName}`);
-
-            // Reset the index to match HEAD (main)
-            await git(`reset HEAD`);
           } catch (error: unknown) {
             const errorMsg =
               error instanceof Error ? error.message : String(error);
             log(`  -> Git error: ${errorMsg}`);
-            // Try to reset index
-            try {
-              await git(`reset HEAD`);
-            } catch {
-              // Ignore reset errors
-            }
             throw new Error(`Failed to push to GitHub: ${errorMsg}`);
+          } finally {
+            // Clean up worktree
+            try {
+              await git(`worktree remove "${worktreeDir}" --force`);
+            } catch {
+              // Try manual cleanup if worktree remove fails
+              try {
+                await fs.rm(worktreeDir, { recursive: true, force: true });
+                await git(`worktree prune`);
+              } catch {
+                // Ignore cleanup errors
+              }
+            }
           }
         }
 

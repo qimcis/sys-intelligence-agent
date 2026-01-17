@@ -4,6 +4,23 @@ import Layout from '../layouts/Layout.astro';
 
 <Layout title="Add Exams - System Intelligence Benchmark">
   <div class="block">
+    <div class="block-header">Default Metadata</div>
+    <p style="color: var(--muted); font-size: 0.75rem; margin-bottom: 1rem;">
+      These values apply to all exams uploaded in this session.
+    </p>
+    <div class="row">
+      <div style="flex: 1;">
+        <label for="default-institution">Institution</label>
+        <input type="text" id="default-institution" placeholder="University of Wisconsin-Madison" />
+      </div>
+      <div style="flex: 1;">
+        <label for="default-course">Course</label>
+        <input type="text" id="default-course" placeholder="CS 537" />
+      </div>
+    </div>
+  </div>
+
+  <div class="block">
     <div class="block-header">Upload Exam Files</div>
     <p style="color: var(--muted); font-size: 0.75rem; margin-bottom: 1rem;">
       Upload multiple exam and solution files. AI will automatically match them and process in parallel.
@@ -187,6 +204,8 @@ import Layout from '../layouts/Layout.astro';
 
       const apiKey = sessionStorage.getItem('openai_api_key') || '';
       const repoPath = sessionStorage.getItem('benchmark_repo_path') || '';
+      const defaultInstitution = (document.getElementById('default-institution') as HTMLInputElement).value.trim();
+      const defaultCourse = (document.getElementById('default-course') as HTMLInputElement).value.trim();
       const githubUsername = sessionStorage.getItem('github_username') || '';
       const githubToken = sessionStorage.getItem('github_token') || '';
 
@@ -292,6 +311,8 @@ import Layout from '../layouts/Layout.astro';
           formData.append('apiKey', apiKey);
 
           if (repoPath) formData.append('repoPath', repoPath);
+          if (defaultInstitution) formData.append('institution', defaultInstitution);
+          if (defaultCourse) formData.append('course', defaultCourse);
           if (githubUsername) formData.append('githubUsername', githubUsername);
           if (githubToken) formData.append('githubToken', githubToken);
 
