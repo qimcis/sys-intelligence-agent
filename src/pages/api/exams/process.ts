@@ -26,6 +26,10 @@ CRITICAL CONTENT CHECKS - FIX THESE:
 8. For Freeform questions: ENSURE "answer" and "llm_judge_instructions" exist.
 9. For ExactMatch questions: ENSURE "choices" array and "answer" field exist.
 10. REMOVE any student responses, professor comments, or solution text that got mixed into question text body.
+11. FIX vague llm_judge_instructions. Replace phrases like "Grade by understanding" or "Provide scoring rubrics" with specific point allocations (e.g., "Award 2 pts for X, 1 pt for Y").
+12. VERIFY llm_judge_instructions point allocations sum to the question's total points and match any rubric given in the source solutions.
+13. CHECK question numbering is consistent - no gaps (e.g., Q1, Q2, Q4 missing Q3). If source has gaps, renumber sequentially.
+14. VERIFY num_questions matches actual question count (count all problem_ids including sub-parts like 8a, 8b as separate questions).
 
 EXAMPLE OF BAD (fix this):
 ## Question 1 [5 points]
@@ -131,8 +135,18 @@ D) Option 4
 \`\`\`
 
 QUESTION TYPE RULES:
-- ExactMatch: Multiple choice or True/False. Include "choices" array and "answer" (letter A-E).
+- ExactMatch: Multiple choice or True/False. Include "choices" array (the TEXT of each option, not letters) and "answer" (letter A-E corresponding to index).
+  Example: "choices": ["Running", "Ready", "Blocked"], "answer": "C" means Blocked is correct
 - Freeform: Open-ended questions. Include "answer" (the correct answer text) and "llm_judge_instructions" (grading rubric). NO "choices" field.
+- Multi-select questions (choose all that apply): Use Freeform type with answer like "A, B, D" and llm_judge_instructions for partial credit.
+
+GRADING RUBRIC REQUIREMENTS (llm_judge_instructions):
+- MUST be specific and actionable, not vague
+- MUST specify point allocation for each part of multi-part questions
+- MUST describe what earns full credit vs partial credit
+- CRITICAL: If the solutions file specifies exact point breakdowns (e.g., "1 mark for X, 2 marks for Y"), you MUST use those EXACT point values in the rubric. Do NOT change or redistribute points.
+- BAD example: "Grade based on understanding" or "Provide scoring rubrics"
+- GOOD example: "Award 2 pts for identifying X. Award 1 pt for partial answer mentioning Y. Award 0 pts if Z is missing."
 
 CRITICAL REMINDERS:
 - Question text = ONLY the question as a student would see it on the exam
@@ -140,6 +154,12 @@ CRITICAL REMINDERS:
 - The "answer" field in JSON metadata stores the correct answer (from solutions file)
 - Tags should be lowercase with hyphens (e.g., "virtual-memory")
 - Use "point" (singular) when points=1, "points" (plural) otherwise
+
+MULTI-PART QUESTIONS:
+- Each sub-question (e.g., 8a, 8b, 8c, 8d) becomes a SEPARATE question with its own problem_id
+- CRITICAL: Each sub-question must be SELF-CONTAINED. Include ALL context (code, diagrams, shared text) needed to answer that specific part.
+- Do NOT say "this scheme" or "the code above" - include the actual code/context in each sub-question
+- Example: If Q8 has parts a-d each analyzing different code, each part (8a, 8b, 8c, 8d) must include its own code snippet
 
 Output ONLY the exam.md content.`;
 
