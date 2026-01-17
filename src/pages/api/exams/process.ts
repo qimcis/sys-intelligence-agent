@@ -1,7 +1,7 @@
 import type { APIRoute } from "astro";
 import { extractTextFromFile } from "../../../lib/pdf-utils";
 import { callOpenAI, MODELS } from "../../../lib/openai-client";
-import { COURSEEXAM_PATH } from "../../../lib/config";
+import { BENCHMARK_REPO_PATH, COURSEEXAM_PATH } from "../../../lib/config";
 import fs from "fs/promises";
 import path from "path";
 import { exec } from "child_process";
@@ -15,7 +15,7 @@ Your task is to review the generated exam.md content and fix ALL issues:
 
 VALIDATION CHECKS:
 1. VERIFY score_total: Sum all "points" values. The score_total in metadata MUST equal this sum.
-2. VERIFY num_questions: Count questions. The num_questions in metadata MUST match.
+2. VERIFY num_questions: Count all questions including sub-parts (8a, 8b, 8c each count as 1). The num_questions in metadata MUST match.
 3. CHECK format consistency: All questions must follow the correct format.
 4. FIX any JSON syntax errors.
 5. ENSURE the # header matches test_paper_name in metadata.
@@ -30,6 +30,8 @@ CRITICAL CONTENT CHECKS - FIX THESE:
 12. VERIFY llm_judge_instructions point allocations sum to the question's total points and match any rubric given in the source solutions.
 13. CHECK question numbering is consistent - no gaps (e.g., Q1, Q2, Q4 missing Q3). If source has gaps, renumber sequentially.
 14. VERIFY num_questions matches actual question count (count all problem_ids including sub-parts like 8a, 8b as separate questions).
+15. REMOVE any skipped/excluded questions entirely (e.g., "Skipped", "Excluded", or points=0). Do NOT include them in the output.
+16. UPDATE score_total and num_questions after removing any skipped/excluded questions.
 
 EXAMPLE OF BAD (fix this):
 ## Question 1 [5 points]
@@ -45,11 +47,35 @@ If everything is correct, output the original content unchanged.
 
 Output ONLY the exam.md content, no explanations or commentary.`;
 
+const FORMAT_SYSTEM_PROMPT = `You are a strict formatter for CourseExam exam.md files.
+
+Your job is to fix formatting only so the file can be parsed by prepare_dataset.py.
+Do NOT change meaning, answers, points, tags, or question text.
+Do NOT add or remove questions.
+
+FORMAT REQUIREMENTS:
+1. The exam metadata JSON must be the first JSON block in the file.
+2. Every JSON block must be fenced with exactly:
+   \`\`\`json
+   { ... }
+   \`\`\`
+3. Each question must have exactly one JSON block, and the block must be closed.
+4. Question separators must be exactly a line containing only: ---
+5. Preserve all content; only fix formatting issues (missing/extra backticks, stray whitespace around separators, etc.).
+
+If the input is already correctly formatted, output it unchanged.
+Output ONLY the corrected exam.md content, no explanations or commentary.`;
+
 function getExamPath(repoPath?: string): string {
   if (repoPath) {
     return path.join(repoPath, "benchmarks", "courseexam_bench", "data", "raw");
   }
   return COURSEEXAM_PATH;
+}
+
+function getCourseExamBenchPath(repoPath?: string): string {
+  const basePath = repoPath || BENCHMARK_REPO_PATH;
+  return path.join(basePath, "benchmarks", "courseexam_bench");
 }
 
 const EXAM_SYSTEM_PROMPT = `You are an expert at converting exam documents into a structured markdown format for the CourseExam benchmark.
@@ -200,7 +226,7 @@ export const POST: APIRoute = async ({ request }) => {
         const githubToken = formData.get("githubToken") as string;
 
         const hasGitHub = !!(githubUsername && githubToken && repoPath);
-        const totalSteps = hasGitHub ? 8 : 6;
+        const totalSteps = hasGitHub ? 10 : 8;
 
         if (!apiKey) {
           log(
@@ -294,10 +320,30 @@ Please generate the exam.md file following the exact format specified. Remember 
 
         log(`Validated: ${examMd.length.toLocaleString()} characters`);
 
+        // Step 5: Format verification
+        logRaw(`\n── Step 5/${totalSteps}: Format Verification ──`);
+        log(`Model: ${MODELS.judge}`);
+
+        const formattedExamMd = await callOpenAI(
+          [
+            { role: "system", content: FORMAT_SYSTEM_PROMPT },
+            {
+              role: "user",
+              content: `Please verify and correct the formatting of the following exam.md content:\n\n${examMd}`,
+            },
+          ],
+          apiKey,
+          MODELS.judge,
+        );
+
+        log(
+          `Format-checked: ${formattedExamMd.length.toLocaleString()} characters`,
+        );
+
         // Extract exam_id from generated content if not provided
         let finalExamId = examId;
         if (!finalExamId) {
-          const match = examMd.match(/"exam_id"\s*:\s*"([^"]+)"/);
+          const match = formattedExamMd.match(/"exam_id"\s*:\s*"([^"]+)"/);
           if (match) {
             finalExamId = match[1];
           } else {
@@ -306,8 +352,8 @@ Please generate the exam.md file following the exact format specified. Remember 
         }
         log(`Exam ID: ${finalExamId}`);
 
-        // Step 5: Create directory
-        logRaw(`\n── Step 5/${totalSteps}: Create Directory ──`);
+        // Step 6: Create directory
+        logRaw(`\n── Step 6/${totalSteps}: Create Directory ──`);
         const courseExamPath = getExamPath(repoPath);
         const examDir = path.join(courseExamPath, finalExamId);
         log(`Path: ${examDir}`);
@@ -327,11 +373,15 @@ Please generate the exam.md file following the exact format specified. Remember 
         await fs.mkdir(examDir, { recursive: true });
         log(`Directory created`);
 
-        // Step 6: Write files
-        logRaw(`\n── Step 6/${totalSteps}: Write Files ──`);
+        // Step 7: Write files
+        logRaw(`\n── Step 7/${totalSteps}: Write Files ──`);
 
         // Write exam.md
-        await fs.writeFile(path.join(examDir, "exam.md"), examMd, "utf-8");
+        await fs.writeFile(
+          path.join(examDir, "exam.md"),
+          formattedExamMd,
+          "utf-8",
+        );
         log(`Wrote: exam.md`);
 
         // Write the solutions file (following benchmark convention)
@@ -351,14 +401,37 @@ Please generate the exam.md file following the exact format specified. Remember 
           }
         }
 
+        // Step 8: Prepare dataset to validate format
+        logRaw(`\n── Step 8/${totalSteps}: Prepare Dataset ──`);
+        const courseExamBenchPath = getCourseExamBenchPath(repoPath);
+        log(`Path: ${courseExamBenchPath}`);
+        try {
+          const { stdout, stderr } = await execAsync(
+            "python3 prepare_dataset.py",
+            { cwd: courseExamBenchPath },
+          );
+          if (stdout?.trim()) {
+            log(stdout.trim());
+          }
+          if (stderr?.trim()) {
+            log(stderr.trim());
+          }
+          log("prepare_dataset.py completed");
+        } catch (error: unknown) {
+          const errorMsg =
+            error instanceof Error ? error.message : String(error);
+          log(`prepare_dataset.py failed: ${errorMsg}`);
+          throw new Error(`Dataset preparation failed: ${errorMsg}`);
+        }
+
         // GitHub integration: create branch and push commit
         if (hasGitHub) {
           // Extract exam info for branch name
-          const examNameMatch = examMd.match(
+          const examNameMatch = formattedExamMd.match(
             /"test_paper_name"\s*:\s*"([^"]+)"/,
           );
-          const courseMatch = examMd.match(/"course"\s*:\s*"([^"]+)"/);
-          const yearMatch = examMd.match(/"year"\s*:\s*(\d+)/);
+          const courseMatch = formattedExamMd.match(/"course"\s*:\s*"([^"]+)"/);
+          const yearMatch = formattedExamMd.match(/"year"\s*:\s*(\d+)/);
 
           // Generate branch name from exam metadata
           let branchName = finalExamId.replace(/_/g, "-");
@@ -397,8 +470,8 @@ Please generate the exam.md file following the exact format specified. Remember 
             `exam-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
           );
 
-          // Step 7: Create git branch
-          logRaw(`\n── Step 7/${totalSteps}: Create Git Branch ──`);
+          // Step 9: Create git branch
+          logRaw(`\n── Step 9/${totalSteps}: Create Git Branch ──`);
           log(`Branch: ${branchName}`);
           try {
             // Fetch latest from origin
@@ -427,8 +500,8 @@ Please generate the exam.md file following the exact format specified. Remember 
             throw new Error(`Failed to create branch/worktree: ${errorMsg}`);
           }
 
-          // Step 8: Commit and push
-          logRaw(`\n── Step 8/${totalSteps}: Push to GitHub ──`);
+          // Step 10: Commit and push
+          logRaw(`\n── Step 10/${totalSteps}: Push to GitHub ──`);
           try {
             // Copy exam files to the worktree
             const worktreeExamDir = path.join(
