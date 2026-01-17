@@ -1,36 +1,50 @@
 import type { APIRoute } from "astro";
 import { callOpenAI, MODELS } from "../../../lib/openai-client";
 
-const SORT_SYSTEM_PROMPT = `You are an expert at analyzing exam file names and matching exam questions with their solutions.
+const SORT_SYSTEM_PROMPT = `You are an expert at analyzing exam file names and organizing them for processing.
 
-You will receive a list of file names. Your task is to:
-1. Identify which files are exam questions and which are solutions
-2. Match each exam file with its corresponding solutions file
-3. Group them into exam pairs
+You will receive a list of file names. Your task is to group them into exams.
 
-File naming patterns to look for:
-- Exams often contain: "exam", "midterm", "final", "quiz", "test", "questions", "problems"
-- Solutions often contain: "solution", "solutions", "answer", "answers", "key", "sol"
-- Files from the same exam usually share: course code, semester, year, exam type
-- Examples: "cs537-fall21-final.pdf" pairs with "cs537-fall21-final-solutions.pdf"
+IMPORTANT: Many solution files contain BOTH questions AND answers in one document.
+- Files like "F18-midterm-sol.pdf", "comp3000-final-2014F-sol.pdf", "W19-midterm-sol.pdf" are COMBINED files
+- These contain the full exam with answers included
+- For combined files: set BOTH exam_file AND solutions_file to the SAME filename
 
-Output a JSON array where each object represents one exam:
+File naming patterns:
+- Combined Q&A files often have: "-sol", "-soln", "-solution", "-answers" in the name WITH NO separate exam file
+- Semester codes: F=Fall, W=Winter, S=Spring/Summer, followed by year (e.g., F18=Fall 2018, W19=Winter 2019)
+- Exam types: "midterm", "mid", "final", "quiz", "exam"
+
+TWO SCENARIOS:
+
+1. COMBINED Q&A files (most common when only solution files are uploaded):
 {
   "exams": [
     {
-      "exam_file": "filename1.pdf",
-      "solutions_file": "filename2.pdf",
-      "reference_files": ["ref1.pdf"],
-      "inferred_name": "CS 537 Fall 2021 Final"
+      "exam_file": "F18-midterm-sol.pdf",
+      "solutions_file": "F18-midterm-sol.pdf",
+      "reference_files": [],
+      "inferred_name": "Fall 2018 Midterm"
+    }
+  ]
+}
+
+2. SEPARATE exam and solution files:
+{
+  "exams": [
+    {
+      "exam_file": "F18-midterm.pdf",
+      "solutions_file": "F18-midterm-sol.pdf",
+      "reference_files": [],
+      "inferred_name": "Fall 2018 Midterm"
     }
   ]
 }
 
 Rules:
-- Every exam MUST have both an exam_file and solutions_file
-- If you cannot confidently match a file, exclude it and note it in an "unmatched" array
-- reference_files are optional supplementary materials (syllabus, lecture notes, etc.)
-- inferred_name should be a human-readable name based on the filename
+- If ALL files have "sol", "soln", "solution", or "answers" in the name, treat them ALL as combined Q&A files
+- For combined files, exam_file and solutions_file should be THE SAME file
+- inferred_name: Extract semester, year, and exam type (e.g., "Fall 2018 Midterm", "Winter 2019 Final")
 
 Output ONLY valid JSON, no explanations.`;
 
@@ -39,17 +53,17 @@ export const POST: APIRoute = async ({ request }) => {
     const { fileNames, apiKey } = await request.json();
 
     if (!apiKey) {
-      return new Response(
-        JSON.stringify({ error: "No API key provided" }),
-        { status: 400, headers: { "Content-Type": "application/json" } }
-      );
+      return new Response(JSON.stringify({ error: "No API key provided" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
     }
 
     if (!fileNames || !Array.isArray(fileNames) || fileNames.length === 0) {
-      return new Response(
-        JSON.stringify({ error: "No files provided" }),
-        { status: 400, headers: { "Content-Type": "application/json" } }
-      );
+      return new Response(JSON.stringify({ error: "No files provided" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
     }
 
     const userPrompt = `Here are the uploaded file names:\n${fileNames.map((f: string, i: number) => `${i + 1}. ${f}`).join("\n")}\n\nPlease analyze these files and group them into exam/solution pairs.`;
@@ -60,7 +74,7 @@ export const POST: APIRoute = async ({ request }) => {
         { role: "user", content: userPrompt },
       ],
       apiKey,
-      MODELS.judge // Using gpt-5-mini for sorting
+      MODELS.judge, // Using gpt-5-mini for sorting
     );
 
     // Parse the JSON response
@@ -76,18 +90,18 @@ export const POST: APIRoute = async ({ request }) => {
     } catch {
       return new Response(
         JSON.stringify({ error: "Failed to parse AI response", raw: response }),
-        { status: 500, headers: { "Content-Type": "application/json" } }
+        { status: 500, headers: { "Content-Type": "application/json" } },
       );
     }
 
-    return new Response(
-      JSON.stringify(result),
-      { status: 200, headers: { "Content-Type": "application/json" } }
-    );
+    return new Response(JSON.stringify(result), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
   } catch (error) {
-    return new Response(
-      JSON.stringify({ error: String(error) }),
-      { status: 500, headers: { "Content-Type": "application/json" } }
-    );
+    return new Response(JSON.stringify({ error: String(error) }), {
+      status: 500,
+      headers: { "Content-Type": "application/json" },
+    });
   }
 };
