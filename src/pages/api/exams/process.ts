@@ -407,7 +407,7 @@ Please generate the exam.md file following the exact format specified. Remember 
         log(`Path: ${courseExamBenchPath}`);
         try {
           const { stdout, stderr } = await execAsync(
-            "python3 prepare_dataset.py",
+            "python3 courseexam/prepare.py",
             { cwd: courseExamBenchPath },
           );
           if (stdout?.trim()) {
