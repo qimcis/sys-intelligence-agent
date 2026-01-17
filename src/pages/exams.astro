@@ -87,13 +87,14 @@ import Layout from '../layouts/Layout.astro';
     .exam-log-content {
       border: 1px solid var(--border);
       border-radius: 0 0 4px 4px;
-      padding: 0.5rem;
+      padding: 0.75rem;
       font-family: monospace;
       font-size: 0.75rem;
       white-space: pre-wrap;
-      max-height: 200px;
+      max-height: 400px;
       overflow-y: auto;
       background: var(--bg);
+      line-height: 1.5;
     }
     .unmatched-files {
       margin-top: 1rem;
@@ -327,13 +328,19 @@ import Layout from '../layouts/Layout.astro';
 
           const reader = response.body?.getReader();
           const decoder = new TextDecoder();
+          let firstChunk = true;
 
           if (reader) {
             while (true) {
               const { done, value } = await reader.read();
               if (done) break;
               const text = decoder.decode(value);
-              logContent.textContent += text;
+              if (firstChunk) {
+                logContent.textContent = text; // Clear "Starting..." on first chunk
+                firstChunk = false;
+              } else {
+                logContent.textContent += text;
+              }
               logContent.scrollTop = logContent.scrollHeight;
             }
           }

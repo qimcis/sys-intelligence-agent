@@ -11,13 +11,30 @@ const execAsync = promisify(exec);
 
 const JUDGE_SYSTEM_PROMPT = `You are a meticulous judge that validates and corrects exam markdown files for the CourseExam benchmark.
 
-Your task is to review the generated exam.md content and fix any issues:
+Your task is to review the generated exam.md content and fix ALL issues:
 
-1. VERIFY score_total: Sum up all the "points" values from each question's JSON block. The score_total in the metadata MUST equal this sum.
-2. VERIFY num_questions: Count the actual number of questions. The num_questions in metadata MUST match.
-3. CHECK format consistency: Ensure all questions follow the correct format.
-4. FIX any JSON syntax errors in the metadata or question blocks.
+VALIDATION CHECKS:
+1. VERIFY score_total: Sum all "points" values. The score_total in metadata MUST equal this sum.
+2. VERIFY num_questions: Count questions. The num_questions in metadata MUST match.
+3. CHECK format consistency: All questions must follow the correct format.
+4. FIX any JSON syntax errors.
 5. ENSURE the # header matches test_paper_name in metadata.
+
+CRITICAL CONTENT CHECKS - FIX THESE:
+6. REMOVE any answers/solutions from the question text body. Questions should ONLY contain what a student sees on the exam.
+7. For Freeform questions: REMOVE "choices" field - it should NOT exist. Keep "answer" field.
+8. For Freeform questions: ENSURE "answer" and "llm_judge_instructions" exist.
+9. For ExactMatch questions: ENSURE "choices" array and "answer" field exist.
+10. REMOVE any student responses, professor comments, or solution text that got mixed into question text body.
+
+EXAMPLE OF BAD (fix this):
+## Question 1 [5 points]
+What does TLB stand for?
+TLB stands for Translation Lookaside Buffer.  <-- REMOVE THIS, it's the answer!
+
+EXAMPLE OF GOOD:
+## Question 1 [5 points]
+What does TLB stand for?
 
 If you find errors, output the CORRECTED exam.md content.
 If everything is correct, output the original content unchanged.
@@ -34,86 +51,97 @@ function getExamPath(repoPath?: string): string {
 const EXAM_SYSTEM_PROMPT = `You are an expert at converting exam documents into a structured markdown format for the CourseExam benchmark.
 
 You will receive:
-1. The raw text of an exam
-2. The raw text of the solutions
-3. Optional metadata overrides (any field not provided should be inferred from the exam content)
+1. The raw text of an exam (questions only)
+2. The raw text of the solutions (answers)
+3. Optional metadata overrides
 
-Your task is to produce a single exam.md file that follows this EXACT format:
+Your task is to produce a single exam.md file with ONLY THE QUESTIONS (no answers in the question text).
 
-IMPORTANT: For any metadata fields not explicitly provided, you MUST infer them from the exam content:
+CRITICAL RULES - READ CAREFULLY:
+1. DO NOT include answers, solutions, or student responses in the question text
+2. DO NOT include "choices" field for Freeform questions - only use it for ExactMatch
+3. The solutions file is ONLY used to determine correct answers for the JSON metadata, NOT to be included in question text
+
+METADATA INFERENCE (for fields not provided):
 - exam_id: Generate from course code, semester, year, and exam type. Use lowercase with underscores.
   CRITICAL: The exam type MUST be correct - look for "midterm", "mid-term", "mid", "final", "quiz", "exam" in the document title/header.
-  - If the document says "Midterm", "Mid-term", "Mid", or "Middle" → use "midterm" in the exam_id
-  - If the document says "Final" → use "final" in the exam_id
-  - NEVER confuse midterm with final! Read the actual document title carefully.
-  Examples: "cs537_fall_2021_midterm", "cs537_spring_2018_final", "cs162_fall_2023_quiz1"
-  DO NOT use "final" if the exam says "midterm" or vice versa! This is a critical error.
-- test_paper_name: Create a human-readable title from the exam header/title (should match the # header)
-- course: Extract the course code/number from the exam (e.g., "CS 537", "Operating Systems")
-- institution: Look for university name in headers, footers, or letterhead (use abbreviation like "UW-Madison", "MIT", "UIUC")
-- year: Extract from date on exam or filename
-- score_total: You MUST actually calculate this by summing all question points. Do NOT assume 100 or any other common value. Add up each question's points to get the true total.
-- num_questions: Count the total number of questions
+  - "Midterm", "Mid-term", "Mid" → use "midterm"
+  - "Final" → use "final"
+  Examples: "cs537_fall_2021_midterm", "cs537_spring_2018_final"
+- test_paper_name: Human-readable title from exam header (should match the # header)
+- course: Course code (e.g., "CS 537")
+- institution: University name (e.g., "University of Wisconsin-Madison")
+- year: Extract from exam date
+- score_total: Sum of all question points (calculate, don't assume)
+- num_questions: Count of questions
 
-FORMAT SPECIFICATION:
+FORMAT:
 
-1. Start with a markdown header using the exam title:
 # {Exam Title}
 
-2. Immediately follow with a JSON metadata block inside a code fence:
 \`\`\`json
 {
-  "exam_id": "cs537_fall_2021_final",
-  "test_paper_name": "CS 537 Fall 2021 Final",
-  "course": "Operating Systems",
+  "exam_id": "cs537_fall_2021_midterm",
+  "test_paper_name": "CS 537 Fall 2021 Midterm",
+  "course": "CS 537",
   "institution": "University of Wisconsin-Madison",
   "year": 2021,
   "score_total": 100,
-  "num_questions": 55
+  "num_questions": 20
 }
 \`\`\`
 
-3. Then for each question, use this format (separated by ---):
-
 ---
 
+## Question 1 [5 point(s)]
 
-## Question {number} [{points} point(s)]
-
-{Question text - convert any images to text descriptions if possible, otherwise note "[Figure excluded]"}
-
-For multiple choice, list options as:
-A) Option text
-B) Option text
-C) Option text
-D) Option text
-
-Your answer should be one letter only (A, B, C, D, or E).
+{Question text ONLY - no answer, no solution in the text}
 
 \`\`\`json
 {
-  "problem_id": "{number}",
-  "points": {points},
-  "type": "ExactMatch" or "Freeform",
-  "tags": ["tag1", "tag2"],
-  "choices": ["option A text", "option B text", "option C text", "option D text"],
+  "problem_id": "1",
+  "points": 5,
+  "type": "Freeform",
+  "tags": ["topic-tag"],
+  "answer": "The correct answer goes here (from solutions file)",
+  "llm_judge_instructions": "Award 5 points for [correct answer criteria]. Award 3 points for [partial credit criteria]. Award 0 points otherwise."
+}
+\`\`\`
+
+---
+
+## Question 2 [3 point(s)]
+
+What is X?
+
+A) Option 1
+B) Option 2
+C) Option 3
+D) Option 4
+
+\`\`\`json
+{
+  "problem_id": "2",
+  "points": 3,
+  "type": "ExactMatch",
+  "tags": ["topic-tag"],
+  "choices": ["Option 1", "Option 2", "Option 3", "Option 4"],
   "answer": "B"
 }
 \`\`\`
 
-IMPORTANT RULES:
-- The # header title and test_paper_name in metadata should match
-- For multiple choice questions, use type "ExactMatch" and include "choices" array. Answer should be the letter (A, B, C, D, E).
-- For True/False, use type "ExactMatch" with choices ["True", "False"]. Answer should be "A" for True, "B" for False.
-- For free-form/explanation questions, use type "Freeform" and include "llm_judge_instructions" with a detailed rubric.
-- For questions that reference materials (MPs, labs, etc.), add "reference_materials": ["MP1.md"] to indicate dependencies.
-- For multi-part questions (e.g., 12-13), you can combine them with a multi-part answer format.
-- Tags should be lowercase with hyphens (e.g., "operating-systems", "virtual-memory").
-- If a question relies on a figure/image that cannot be described in text, exclude it and update score_total accordingly.
-- CRITICAL: The sum of all question points MUST equal score_total in the metadata. Actually add up the points - do not guess or assume 100.
-- Use "point" (singular) when points=1, "points" (plural) otherwise.
+QUESTION TYPE RULES:
+- ExactMatch: Multiple choice or True/False. Include "choices" array and "answer" (letter A-E).
+- Freeform: Open-ended questions. Include "answer" (the correct answer text) and "llm_judge_instructions" (grading rubric). NO "choices" field.
 
-Output ONLY the exam.md content, no other text.`;
+CRITICAL REMINDERS:
+- Question text = ONLY the question as a student would see it on the exam
+- NO answers, NO solutions, NO student responses in the question text body
+- The "answer" field in JSON metadata stores the correct answer (from solutions file)
+- Tags should be lowercase with hyphens (e.g., "virtual-memory")
+- Use "point" (singular) when points=1, "points" (plural) otherwise
+
+Output ONLY the exam.md content.`;
 
 export const POST: APIRoute = async ({ request }) => {
   const encoder = new TextEncoder();
