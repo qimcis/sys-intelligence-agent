@@ -120,7 +120,15 @@ export const POST: APIRoute = async ({ request }) => {
 
   const stream = new ReadableStream({
     async start(controller) {
+      const startTime = Date.now();
+      const getTimestamp = () => {
+        const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+        return `[${elapsed}s]`;
+      };
       const log = (msg: string) => {
+        controller.enqueue(encoder.encode(`${getTimestamp()} ${msg}\n`));
+      };
+      const logRaw = (msg: string) => {
         controller.enqueue(encoder.encode(msg + "\n"));
       };
 
@@ -154,21 +162,21 @@ export const POST: APIRoute = async ({ request }) => {
           return;
         }
 
-        log(
-          `[1/${totalSteps}] Extracting text from exam file: ${examFile.name}`,
-        );
+        // Step 1: Extract exam text
+        logRaw(`\n── Step 1/${totalSteps}: Extract Exam Text ──`);
+        log(`Reading: ${examFile.name}`);
         const examText = await extractTextFromFile(examFile, apiKey);
-        log(`  -> Extracted ${examText.length} characters`);
+        log(`Extracted ${examText.length.toLocaleString()} characters`);
 
-        log(
-          `[2/${totalSteps}] Extracting text from solutions file: ${solutionsFile.name}`,
-        );
+        // Step 2: Extract solutions text
+        logRaw(`\n── Step 2/${totalSteps}: Extract Solutions Text ──`);
+        log(`Reading: ${solutionsFile.name}`);
         const solutionsText = await extractTextFromFile(solutionsFile, apiKey);
-        log(`  -> Extracted ${solutionsText.length} characters`);
+        log(`Extracted ${solutionsText.length.toLocaleString()} characters`);
 
-        log(
-          `[3/${totalSteps}] Generating structured exam.md (${MODELS.generator})...`,
-        );
+        // Step 3: Generate exam.md
+        logRaw(`\n── Step 3/${totalSteps}: Generate Exam Markdown ──`);
+        log(`Model: ${MODELS.generator}`);
 
         // Build metadata overrides section - only include fields that were provided
         const overrides: string[] = [];
@@ -179,6 +187,10 @@ export const POST: APIRoute = async ({ request }) => {
         if (year) overrides.push(`- Year: ${year}`);
         if (scoreTotal) overrides.push(`- Total Score: ${scoreTotal}`);
         if (tags) overrides.push(`- Tags: ${tags}`);
+
+        if (overrides.length > 0) {
+          log(`Using overrides: ${course || "–"} @ ${institution || "–"}`);
+        }
 
         const overridesSection =
           overrides.length > 0
@@ -214,11 +226,11 @@ Please generate the exam.md file following the exact format specified. Remember 
           MODELS.generator,
         );
 
-        log(`  -> Generated ${generatedExamMd.length} characters`);
+        log(`Generated ${generatedExamMd.length.toLocaleString()} characters`);
 
-        log(
-          `[4/${totalSteps}] Validating and correcting with judge model (${MODELS.judge})...`,
-        );
+        // Step 4: Validate with judge
+        logRaw(`\n── Step 4/${totalSteps}: Validate & Correct ──`);
+        log(`Model: ${MODELS.judge}`);
 
         const examMd = await callOpenAI(
           [
@@ -232,7 +244,7 @@ Please generate the exam.md file following the exact format specified. Remember 
           MODELS.judge,
         );
 
-        log(`  -> Validated exam.md (${examMd.length} characters)`);
+        log(`Validated: ${examMd.length.toLocaleString()} characters`);
 
         // Extract exam_id from generated content if not provided
         let finalExamId = examId;
@@ -240,27 +252,24 @@ Please generate the exam.md file following the exact format specified. Remember 
           const match = examMd.match(/"exam_id"\s*:\s*"([^"]+)"/);
           if (match) {
             finalExamId = match[1];
-            log(`  -> Auto-generated exam ID: ${finalExamId}`);
           } else {
             finalExamId = `exam_${Date.now()}`;
-            log(
-              `  -> Could not extract exam ID, using fallback: ${finalExamId}`,
-            );
           }
         }
+        log(`Exam ID: ${finalExamId}`);
 
+        // Step 5: Create directory
+        logRaw(`\n── Step 5/${totalSteps}: Create Directory ──`);
         const courseExamPath = getExamPath(repoPath);
-        log(`[5/${totalSteps}] Creating exam directory: ${finalExamId}`);
-        log(`  -> Using repo path: ${courseExamPath}`);
         const examDir = path.join(courseExamPath, finalExamId);
+        log(`Path: ${examDir}`);
 
         // Check if exam already exists - never overwrite existing exams
         try {
           await fs.access(path.join(examDir, "exam.md"));
-          log(`\nERROR: Exam already exists at ${examDir}/exam.md`);
-          log(
-            `Refusing to overwrite existing exam. If you want to replace it, delete the directory first.`,
-          );
+          logRaw(`\n✗ ERROR: Exam already exists!`);
+          log(`Location: ${examDir}/exam.md`);
+          log(`Delete the directory first if you want to replace it.`);
           controller.close();
           return;
         } catch {
@@ -268,18 +277,20 @@ Please generate the exam.md file following the exact format specified. Remember 
         }
 
         await fs.mkdir(examDir, { recursive: true });
+        log(`Directory created`);
 
-        log(`[6/${totalSteps}] Writing files to ${examDir}/`);
+        // Step 6: Write files
+        logRaw(`\n── Step 6/${totalSteps}: Write Files ──`);
 
         // Write exam.md
         await fs.writeFile(path.join(examDir, "exam.md"), examMd, "utf-8");
-        log(`  -> exam.md`);
+        log(`Wrote: exam.md`);
 
         // Write the solutions file (following benchmark convention)
         const solutionsPath = path.join(examDir, solutionsFile.name);
         const solutionsContent = Buffer.from(await solutionsFile.arrayBuffer());
         await fs.writeFile(solutionsPath, solutionsContent);
-        log(`  -> ${solutionsFile.name}`);
+        log(`Wrote: ${solutionsFile.name}`);
 
         // Handle reference files
         const referenceFiles = formData.getAll("referenceFiles") as File[];
@@ -288,7 +299,7 @@ Please generate the exam.md file following the exact format specified. Remember 
             const refPath = path.join(examDir, refFile.name);
             const refContent = Buffer.from(await refFile.arrayBuffer());
             await fs.writeFile(refPath, refContent);
-            log(`  -> ${refFile.name}`);
+            log(`Wrote: ${refFile.name}`);
           }
         }
 
@@ -338,7 +349,9 @@ Please generate the exam.md file following the exact format specified. Remember 
             `exam-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
           );
 
-          log(`[7/${totalSteps}] Creating git branch: ${branchName}`);
+          // Step 7: Create git branch
+          logRaw(`\n── Step 7/${totalSteps}: Create Git Branch ──`);
+          log(`Branch: ${branchName}`);
           try {
             // Fetch latest from origin
             await git(`fetch origin main`);
@@ -346,12 +359,12 @@ Please generate the exam.md file following the exact format specified. Remember 
             // Create the branch if it doesn't exist
             try {
               await git(`branch ${branchName} origin/main`);
-              log(`  -> Branch created: ${branchName}`);
+              log(`Branch created`);
             } catch (error: unknown) {
               const errorMsg =
                 error instanceof Error ? error.message : String(error);
               if (errorMsg.includes("already exists")) {
-                log(`  -> Branch already exists: ${branchName}`);
+                log(`Branch already exists, reusing`);
               } else {
                 throw error;
               }
@@ -366,7 +379,8 @@ Please generate the exam.md file following the exact format specified. Remember 
             throw new Error(`Failed to create branch/worktree: ${errorMsg}`);
           }
 
-          log(`[8/${totalSteps}] Committing and pushing to GitHub...`);
+          // Step 8: Commit and push
+          logRaw(`\n── Step 8/${totalSteps}: Push to GitHub ──`);
           try {
             // Copy exam files to the worktree
             const worktreeExamDir = path.join(
@@ -395,14 +409,14 @@ Please generate the exam.md file following the exact format specified. Remember 
             // Stage, commit, and push
             await wtGit(`add -A`);
             await wtGit(`commit -m "add ${examTitle}"`);
-            log(`  -> Committed: add ${examTitle}`);
+            log(`Committed: "add ${examTitle}"`);
 
             await wtGit(`push "${remoteUrl}" ${branchName}`);
-            log(`  -> Pushed to origin/${branchName}`);
+            log(`Pushed to origin/${branchName}`);
           } catch (error: unknown) {
             const errorMsg =
               error instanceof Error ? error.message : String(error);
-            log(`  -> Git error: ${errorMsg}`);
+            log(`Git error: ${errorMsg}`);
             throw new Error(`Failed to push to GitHub: ${errorMsg}`);
           } finally {
             // Clean up worktree
@@ -420,23 +434,19 @@ Please generate the exam.md file following the exact format specified. Remember 
           }
         }
 
-        log(`\n=== SUCCESS ===`);
-        log(`Exam added to: ${examDir}`);
+        // Success summary
+        logRaw(`\n════════════════════════════════════`);
+        logRaw(`✓ SUCCESS`);
+        logRaw(`════════════════════════════════════`);
+        log(`Exam ID: ${finalExamId}`);
+        log(`Location: ${examDir}`);
         if (hasGitHub) {
-          log(`\nGitHub: Changes pushed to branch, ready for PR`);
-        }
-        log(`\nNext steps:`);
-        log(`1. Review the generated exam.md file`);
-        log(
-          `2. Run 'python prepare_dataset.py' in the courseexam_bench directory to regenerate the dataset`,
-        );
-        if (!hasGitHub) {
-          log(`3. Commit your changes to the repository`);
+          log(`Branch: origin/${finalExamId.replace(/_/g, "-")}`);
         }
 
         controller.close();
       } catch (error) {
-        log(`\nERROR: ${error}`);
+        logRaw(`\n✗ ERROR: ${error}`);
         controller.close();
       }
     },
