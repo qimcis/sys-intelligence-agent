@@ -25,7 +25,6 @@ export async function runOpenCode(
       cwd: workingDir,
       env: {
         ...process.env,
-        // Disable interactive prompts
         CI: "true",
       },
       stdio: ["pipe", "pipe", "pipe"],
@@ -60,7 +59,6 @@ export async function runOpenCode(
   });
 }
 
-// Alternative: Use OpenAI directly for simpler agentic tasks
 export async function analyzeLabWithOpenAI(
   repoPath: string,
   repoUrl: string,
@@ -228,9 +226,7 @@ ${generatedResponse}`;
     MODELS.judge,
   );
 
-  // Parse the response
   try {
-    // Extract JSON from response (handle markdown code blocks)
     let jsonStr = response;
     const jsonMatch = response.match(/```(?:json)?\s*([\s\S]*?)```/);
     if (jsonMatch) {

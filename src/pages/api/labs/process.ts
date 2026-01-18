@@ -76,7 +76,6 @@ export const POST: APIRoute = async ({ request }) => {
           return;
         }
 
-        // Create temp directory with timestamp (courseId may not be known yet)
         const tempId = courseId || `lab_${Date.now()}`;
         tempDir = path.join(os.tmpdir(), `lab-${tempId}`);
         await fs.mkdir(tempDir, { recursive: true });
@@ -108,7 +107,6 @@ export const POST: APIRoute = async ({ request }) => {
           log,
         );
 
-        // Use AI-generated metadata if not provided
         courseId = courseId || analysis.course_metadata.course_id;
         courseName = courseName || analysis.course_metadata.name;
         institution = institution || analysis.course_metadata.institution;
@@ -194,9 +192,7 @@ export const POST: APIRoute = async ({ request }) => {
         await fs.rm(tempDir, { recursive: true, force: true });
         tempDir = null;
 
-        // GitHub integration: create branch and push commit
         if (hasGitHub) {
-          // Generate branch name from course metadata
           const coursePart = courseId.toLowerCase().replace(/\s+/g, "-");
           const yearPart = year || new Date().getFullYear();
           const branchName = `${coursePart}-${yearPart}-lab`;
@@ -206,17 +202,14 @@ export const POST: APIRoute = async ({ request }) => {
 
           log(`[7/${totalSteps}] Creating git branch: ${branchName}`);
           try {
-            // Ensure we're in the repo directory
             process.chdir(repoPath);
 
-            // Fetch latest and create new branch from main
             await execAsync(`git fetch origin main`);
             await execAsync(`git checkout -b ${branchName} origin/main`);
             log(`  -> Branch created: ${branchName}`);
           } catch (error: unknown) {
             const errorMsg =
               error instanceof Error ? error.message : String(error);
-            // Branch might already exist, try to checkout
             if (errorMsg.includes("already exists")) {
               await execAsync(`git checkout ${branchName}`);
               log(`  -> Branch already exists, checked out: ${branchName}`);
@@ -227,32 +220,24 @@ export const POST: APIRoute = async ({ request }) => {
 
           log(`[8/${totalSteps}] Committing and pushing to GitHub...`);
           try {
-            // Stage the new course directory
             await execAsync(`git add "${courseDir}"`);
 
-            // Also stage courses.json update
             await execAsync(`git add "${coursesJsonPath}"`);
 
-            // Commit with descriptive message
             await execAsync(`git commit -m "add \\"${labTitle}\\" lab"`);
             log(`  -> Committed: add "${labTitle}" lab`);
 
-            // Push to remote
             await execAsync(`git push "${remoteUrl}" ${branchName}`);
             log(`  -> Pushed to origin/${branchName}`);
 
-            // Switch back to main
             await execAsync(`git checkout main`);
           } catch (error: unknown) {
             const errorMsg =
               error instanceof Error ? error.message : String(error);
             log(`  -> Git error: ${errorMsg}`);
-            // Try to recover by switching back to main
             try {
               await execAsync(`git checkout main`);
-            } catch {
-              // Ignore recovery errors
-            }
+            } catch {}
             throw new Error(`Failed to push to GitHub: ${errorMsg}`);
           }
         }
@@ -277,7 +262,6 @@ export const POST: APIRoute = async ({ request }) => {
       } catch (error) {
         log(`\nERROR: ${error}`);
 
-        // Cleanup on error
         if (tempDir) {
           try {
             await fs.rm(tempDir, { recursive: true, force: true });
@@ -366,7 +350,6 @@ async function copyStarterFiles(
   const starterDir = path.join(taskDir, "starter");
   await fs.mkdir(starterDir, { recursive: true });
 
-  // Copy the entire source directory structure, excluding common non-essential files
   const excludePatterns = [
     ".git",
     "node_modules",
@@ -430,7 +413,6 @@ async function updateCoursesJson(
     // File doesn't exist or is invalid, start fresh
   }
 
-  // Check if course already exists
   const existingIndex = coursesData.courses.findIndex(
     (c) => c.course_id === courseId,
   );

@@ -74,13 +74,11 @@ export const POST: APIRoute = async ({ request }) => {
         { role: "user", content: userPrompt },
       ],
       apiKey,
-      MODELS.judge, // Using gpt-5-mini for sorting
+      MODELS.judge,
     );
 
-    // Parse the JSON response
     let result;
     try {
-      // Try to extract JSON from the response (in case there's extra text)
       const jsonMatch = response.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
         result = JSON.parse(jsonMatch[0]);

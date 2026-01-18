@@ -1,11 +1,9 @@
 import { pdf } from "pdf-to-img";
 
-// Minimum text length to consider a PDF as having extractable text
 const MIN_TEXT_LENGTH = 100;
 
 export async function extractTextFromPdf(buffer: Buffer): Promise<string> {
   try {
-    // Import pdf-parse's core functionality directly to avoid test file issue
     const { default: pdfParse } = await import("pdf-parse/lib/pdf-parse.js");
     const data = await pdfParse(buffer);
     return data.text;
@@ -18,33 +16,25 @@ export async function extractTextFromPdfWithOcr(
   buffer: Buffer,
   apiKey: string,
 ): Promise<string> {
-  // First, try regular text extraction
   let extractedText = "";
   try {
     extractedText = await extractTextFromPdf(buffer);
-  } catch {
-    // Ignore extraction errors, we'll try OCR
-  }
+  } catch {}
 
-  // If we got enough text, return it
   if (extractedText.trim().length >= MIN_TEXT_LENGTH) {
     return extractedText;
   }
 
-  // Otherwise, use OCR via OpenAI Vision API
   console.log("PDF appears to be image-based, using OCR...");
 
   const pages: string[] = [];
   let pageNum = 0;
 
-  // Convert PDF pages to images
   const pdfDocument = await pdf(buffer, { scale: 2.0 });
   for await (const image of pdfDocument) {
     pageNum++;
-    // image is a Buffer containing PNG data
     const base64Image = image.toString("base64");
 
-    // Call OpenAI Vision API to extract text
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {

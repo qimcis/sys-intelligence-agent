@@ -766,7 +766,6 @@ Please generate the exam.md file following the exact format specified. Remember 
         const examDir = path.join(courseExamPath, finalExamId);
         log(`Path: ${examDir}`);
 
-        // Check if exam already exists - never overwrite existing exams
         try {
           await fs.access(path.join(examDir, "exam.md"));
           logRaw(`\n✗ ERROR: Exam already exists!`);
@@ -774,9 +773,7 @@ Please generate the exam.md file following the exact format specified. Remember 
           log(`Delete the directory first if you want to replace it.`);
           controller.close();
           return;
-        } catch {
-          // File doesn't exist, safe to proceed
-        }
+        } catch {}
 
         await fs.mkdir(examDir, { recursive: true });
         log(`Directory created`);
@@ -784,17 +781,14 @@ Please generate the exam.md file following the exact format specified. Remember 
         // Step 7: Write files
         logRaw(`\n── Step 7/${totalSteps}: Write Files ──`);
 
-        // Write exam.md
         await fs.writeFile(path.join(examDir, "exam.md"), finalExamMd, "utf-8");
         log(`Wrote: exam.md`);
 
-        // Write the solutions file (following benchmark convention)
         const solutionsPath = path.join(examDir, solutionsFile.name);
         const solutionsContent = Buffer.from(await solutionsFile.arrayBuffer());
         await fs.writeFile(solutionsPath, solutionsContent);
         log(`Wrote: ${solutionsFile.name}`);
 
-        // Handle reference files
         const referenceFiles = formData.getAll("referenceFiles") as File[];
         if (referenceFiles.length > 0) {
           for (const refFile of referenceFiles) {
@@ -863,22 +857,18 @@ Please generate the exam.md file following the exact format specified. Remember 
           throw new Error(`Data schema tests failed: ${errorMsg}`);
         }
 
-        // GitHub integration: create branch and push commit
         if (hasGitHub) {
-          // Extract exam info for branch name
           const examNameMatch = finalExamMd.match(
             /"test_paper_name"\s*:\s*"([^"]+)"/,
           );
           const courseMatch = finalExamMd.match(/"course"\s*:\s*"([^"]+)"/);
           const yearMatch = finalExamMd.match(/"year"\s*:\s*(\d+)/);
 
-          // Generate branch name from exam metadata
           let branchName = finalExamId.replace(/_/g, "-");
           if (
             !branchName ||
             branchName === `exam-${Date.now()}`.replace(/_/g, "-")
           ) {
-            // Fallback: build from extracted metadata
             const coursePart = courseMatch
               ? courseMatch[1].toLowerCase().replace(/\s+/g, "")
               : "exam";
@@ -893,16 +883,13 @@ Please generate the exam.md file following the exact format specified. Remember 
             branchName = `${coursePart}-${yearPart}-${typePart}`;
           }
 
-          // Sanitize exam title for commit message (remove special chars that break shell)
           const examTitle = (examNameMatch ? examNameMatch[1] : finalExamId)
             .replace(/[()]/g, "")
             .replace(/"/g, "'");
           const remoteUrl = `https://${githubUsername}:${githubToken}@github.com/${githubUsername}/system-intelligence-benchmark.git`;
 
-          // Use -C flag to run git commands in the repo directory
           const git = (cmd: string) => execAsync(`git -C "${repoPath}" ${cmd}`);
 
-          // Create a unique worktree for this parallel operation
           const worktreeDir = path.join(
             repoPath,
             ".worktrees",
@@ -913,10 +900,8 @@ Please generate the exam.md file following the exact format specified. Remember 
           logRaw(`\n── Step 10/${totalSteps}: Create Git Branch ──`);
           log(`Branch: ${branchName}`);
           try {
-            // Fetch latest from origin
             await git(`fetch origin main`);
 
-            // Create the branch if it doesn't exist
             try {
               await git(`branch ${branchName} origin/main`);
               log(`Branch created`);
@@ -930,7 +915,6 @@ Please generate the exam.md file following the exact format specified. Remember 
               }
             }
 
-            // Create a worktree for isolated operations
             await fs.mkdir(path.dirname(worktreeDir), { recursive: true });
             await git(`worktree add "${worktreeDir}" ${branchName}`);
           } catch (error: unknown) {
@@ -942,7 +926,6 @@ Please generate the exam.md file following the exact format specified. Remember 
           // Step 11: Commit and push
           logRaw(`\n── Step 11/${totalSteps}: Push to GitHub ──`);
           try {
-            // Copy exam files to the worktree
             const worktreeExamDir = path.join(
               worktreeDir,
               "benchmarks",
@@ -953,7 +936,6 @@ Please generate the exam.md file following the exact format specified. Remember 
             );
             await fs.mkdir(worktreeExamDir, { recursive: true });
 
-            // Copy all files from examDir to worktreeExamDir
             const files = await fs.readdir(examDir);
             for (const file of files) {
               await fs.copyFile(
@@ -962,11 +944,9 @@ Please generate the exam.md file following the exact format specified. Remember 
               );
             }
 
-            // Git operations in the worktree
             const wtGit = (cmd: string) =>
               execAsync(`git -C "${worktreeDir}" ${cmd}`);
 
-            // Stage, commit, and push
             await wtGit(`add -A`);
             await wtGit(`commit -m "add ${examTitle}"`);
             log(`Committed: "add ${examTitle}"`);
@@ -979,11 +959,9 @@ Please generate the exam.md file following the exact format specified. Remember 
             log(`Git error: ${errorMsg}`);
             throw new Error(`Failed to push to GitHub: ${errorMsg}`);
           } finally {
-            // Clean up worktree
             try {
               await git(`worktree remove "${worktreeDir}" --force`);
             } catch {
-              // Try manual cleanup if worktree remove fails
               try {
                 await fs.rm(worktreeDir, { recursive: true, force: true });
                 await git(`worktree prune`);
@@ -1027,7 +1005,6 @@ Please generate the exam.md file following the exact format specified. Remember 
           }
         }
 
-        // Success summary
         logRaw(`\n════════════════════════════════════`);
         logRaw(`✓ SUCCESS`);
         logRaw(`════════════════════════════════════`);

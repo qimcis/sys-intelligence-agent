@@ -1,7 +1,5 @@
 # System Intelligence Benchmark Contributor
 
-A web interface for adding exams and labs to the System Intelligence Benchmark repository.
-
 ## Setup
 
 ```bash
@@ -47,7 +45,7 @@ The server runs on `http://localhost:3000` by default.
 
 The AI will parse the exam and solutions, generating a structured `exam.md` file in the courseexam format.
 
-### Add Labs
+### Add Labs (WIP)
 
 1. Navigate to `/labs`
 2. Enter the GitHub repository URL
@@ -63,12 +61,5 @@ The AI agent will:
 
 ## Output Locations
 
-- **Exams**: `/home/qi/system-intelligence-benchmark/benchmarks/courseexam_bench/data/raw/{exam_id}/`
-- **Labs**: `/home/qi/system-intelligence-benchmark/benchmarks/courselab_bench/data/{course_id}/`
-
-## After Adding Content
-
-1. Review the generated files
-2. Test lab evaluation scripts if applicable
-3. For exams, run `python prepare_dataset.py` in the courseexam_bench directory
-4. Commit changes to the repository
+- **Exams**: `/system-intelligence-benchmark/benchmarks/courseexam_bench/data/raw/{exam_id}/`
+- **Labs**: `/system-intelligence-benchmark/benchmarks/courselab_bench/data/{course_id}/`
