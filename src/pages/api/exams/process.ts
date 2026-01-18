@@ -78,6 +78,70 @@ function getCourseExamBenchPath(repoPath?: string): string {
   return path.join(basePath, "benchmarks", "courseexam_bench");
 }
 
+async function createOrGetPullRequest(params: {
+  githubUsername: string;
+  githubToken: string;
+  branchName: string;
+  title: string;
+  body: string;
+}): Promise<string> {
+  const { githubUsername, githubToken, branchName, title, body } = params;
+  const owner = "sys-intelligence";
+  const repo = "system-intelligence-benchmark";
+  const base = "main";
+  const head = `${githubUsername}:${branchName}`;
+  const apiBase = `https://api.github.com/repos/${owner}/${repo}`;
+
+  const headers = {
+    Accept: "application/vnd.github+json",
+    Authorization: `Bearer ${githubToken}`,
+    "X-GitHub-Api-Version": "2022-11-28",
+  };
+
+  const listResponse = await fetch(
+    `${apiBase}/pulls?state=open&base=${base}&head=${encodeURIComponent(head)}`,
+    { headers },
+  );
+  if (!listResponse.ok) {
+    const errorText = await listResponse.text();
+    throw new Error(
+      `GitHub PR lookup failed: ${listResponse.status} - ${errorText}`,
+    );
+  }
+
+  const existing = (await listResponse.json()) as Array<{ html_url?: string }>;
+  if (existing.length > 0 && existing[0]?.html_url) {
+    return existing[0].html_url;
+  }
+
+  const createResponse = await fetch(`${apiBase}/pulls`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      title,
+      head,
+      base,
+      body,
+      draft: true,
+      maintainer_can_modify: true,
+    }),
+  });
+
+  if (!createResponse.ok) {
+    const errorText = await createResponse.text();
+    throw new Error(
+      `GitHub PR create failed: ${createResponse.status} - ${errorText}`,
+    );
+  }
+
+  const created = (await createResponse.json()) as { html_url?: string };
+  if (!created?.html_url) {
+    throw new Error("GitHub PR create response missing html_url");
+  }
+
+  return created.html_url;
+}
+
 const EXAM_SYSTEM_PROMPT = `You are an expert at converting exam documents into a structured markdown format for the CourseExam benchmark.
 
 You will receive:
@@ -226,7 +290,7 @@ export const POST: APIRoute = async ({ request }) => {
         const githubToken = formData.get("githubToken") as string;
 
         const hasGitHub = !!(githubUsername && githubToken && repoPath);
-        const totalSteps = hasGitHub ? 10 : 8;
+        const totalSteps = hasGitHub ? 11 : 8;
 
         if (!apiKey) {
           log(
@@ -552,6 +616,24 @@ Please generate the exam.md file following the exact format specified. Remember 
                 // Ignore cleanup errors
               }
             }
+          }
+
+          // Step 11: Create pull request
+          logRaw(`\n── Step 11/${totalSteps}: Create Pull Request ──`);
+          try {
+            const prUrl = await createOrGetPullRequest({
+              githubUsername,
+              githubToken,
+              branchName,
+              title: `Add ${examTitle}`,
+              body: `Adds exam ${finalExamId}.`,
+            });
+            log(`PR: ${prUrl}`);
+          } catch (error: unknown) {
+            const errorMsg =
+              error instanceof Error ? error.message : String(error);
+            log(`PR error: ${errorMsg}`);
+            throw new Error(`Failed to create pull request: ${errorMsg}`);
           }
         }
 
