@@ -15,24 +15,26 @@ Your task is to review the generated exam.md content and fix ALL issues:
 
 VALIDATION CHECKS:
 1. VERIFY score_total: Sum all "points" values. The score_total in metadata MUST equal this sum.
-2. VERIFY num_questions: Count all questions including sub-parts (8a, 8b, 8c each count as 1). The num_questions in metadata MUST match.
-3. CHECK format consistency: All questions must follow the correct format.
-4. FIX any JSON syntax errors.
-5. ENSURE the # header matches test_paper_name in metadata.
+2. VERIFY num_questions: Count every question JSON block with "problem_id" (each sub-part like 8a, 8b counts as 1). The num_questions in metadata MUST equal this count.
+3. VERIFY tags format: Every tag must match ^[a-z0-9-]+$ (lowercase, digits, hyphens only). Normalize invalid tags by lowercasing, replacing spaces/underscores/slashes with hyphens, removing other invalid characters, collapsing multiple hyphens, trimming leading/trailing hyphens, and deduping. If tags become empty, set to ["misc"].
+4. VERIFY every question has a NON-EMPTY "answer" field. Never leave it blank. If the answer is missing or empty, infer it from the solutions or the question context; if still uncertain, write "Unknown" (not empty).
+5. CHECK format consistency: All questions must follow the correct format.
+6. FIX any JSON syntax errors.
+7. ENSURE the # header matches test_paper_name in metadata.
 
 CRITICAL CONTENT CHECKS - FIX THESE:
-6. REMOVE any answers/solutions from the question text body. Questions should ONLY contain what a student sees on the exam.
-7. For Freeform questions: REMOVE "choices" field - it should NOT exist. Keep "answer" field.
-8. For Freeform questions: ENSURE "answer" and "llm_judge_instructions" exist.
-9. For ExactMatch questions: ENSURE "choices" array and "answer" field exist.
-10. REMOVE any student responses, professor comments, or solution text that got mixed into question text body.
-11. FIX vague llm_judge_instructions. Replace phrases like "Grade by understanding" or "Provide scoring rubrics" with specific point allocations (e.g., "Award 2 pts for X, 1 pt for Y").
-12. VERIFY llm_judge_instructions point allocations sum to the question's total points and match any rubric given in the source solutions.
-13. CHECK question numbering is consistent - no gaps (e.g., Q1, Q2, Q4 missing Q3). If source has gaps, renumber sequentially.
-14. VERIFY num_questions matches actual question count (count all problem_ids including sub-parts like 8a, 8b as separate questions).
-15. REMOVE any skipped/excluded questions entirely (e.g., "Skipped", "Excluded", or points=0). Do NOT include them in the output.
-16. UPDATE score_total and num_questions after removing any skipped/excluded questions.
-17. ENSURE all "points" values are integers. If any are fractional, rescale all question points and score_total by the smallest factor to make them integers (e.g., 0.5 -> multiply all points by 2). Update any point allocations in llm_judge_instructions to use integers.
+7. REMOVE any answers/solutions from the question text body. Questions should ONLY contain what a student sees on the exam.
+8. For Freeform questions: REMOVE "choices" field - it should NOT exist. Keep "answer" field.
+9. For Freeform questions: ENSURE "answer" and "llm_judge_instructions" exist.
+10. For ExactMatch questions: ENSURE "choices" array and "answer" field exist.
+11. REMOVE any student responses, professor comments, or solution text that got mixed into question text body.
+12. FIX vague llm_judge_instructions. Replace phrases like "Grade by understanding" or "Provide scoring rubrics" with specific point allocations (e.g., "Award 2 pts for X, 1 pt for Y").
+13. VERIFY llm_judge_instructions point allocations sum to the question's total points and match any rubric given in the source solutions.
+14. CHECK question numbering is consistent - no gaps (e.g., Q1, Q2, Q4 missing Q3). If source has gaps, renumber sequentially.
+15. VERIFY num_questions matches actual question count (count all problem_ids including sub-parts like 8a, 8b as separate questions).
+16. REMOVE any skipped/excluded questions entirely (e.g., "Skipped", "Excluded", or points=0). Do NOT include them in the output.
+17. UPDATE score_total and num_questions after removing any skipped/excluded questions.
+18. ENSURE all "points" values are integers. If any are fractional, rescale all question points and score_total by the smallest factor to make them integers (e.g., 0.5 -> multiply all points by 2). Update any point allocations in llm_judge_instructions to use integers.
 
 EXAMPLE OF BAD (fix this):
 ## Question 1 [5 points]
@@ -142,6 +144,171 @@ function assertIntegerPoints(examMd: string): void {
       );
     }
   }
+}
+
+function assertNonEmptyAnswers(examMd: string): void {
+  const jsonBlockRegex = /```json\n([\s\S]*?)\n```/g;
+  const matches = examMd.matchAll(jsonBlockRegex);
+  const missingAnswers: string[] = [];
+
+  for (const match of matches) {
+    const jsonText = match[1];
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = JSON.parse(jsonText) as Record<string, unknown>;
+    } catch {
+      continue;
+    }
+
+    if (!Object.prototype.hasOwnProperty.call(parsed, "problem_id")) {
+      continue;
+    }
+
+    const answer = parsed.answer;
+    if (typeof answer !== "string" || answer.trim().length === 0) {
+      missingAnswers.push(String(parsed.problem_id ?? "?"));
+    }
+  }
+
+  if (missingAnswers.length > 0) {
+    throw new Error(
+      `Missing or empty answers for problem_id(s): ${missingAnswers.join(", ")}`,
+    );
+  }
+}
+
+function normalizeTags(rawTags: unknown): string[] {
+  if (!Array.isArray(rawTags)) {
+    return ["misc"];
+  }
+
+  const normalized: string[] = [];
+  const seen = new Set<string>();
+
+  for (const tag of rawTags) {
+    if (typeof tag !== "string") {
+      continue;
+    }
+
+    let cleaned = tag.toLowerCase();
+    cleaned = cleaned.replace(/[\s_\/]+/g, "-");
+    cleaned = cleaned.replace(/[^a-z0-9-]/g, "");
+    cleaned = cleaned.replace(/-+/g, "-");
+    cleaned = cleaned.replace(/^-+|-+$/g, "");
+
+    if (!cleaned) {
+      continue;
+    }
+
+    if (!seen.has(cleaned)) {
+      seen.add(cleaned);
+      normalized.push(cleaned);
+    }
+  }
+
+  return normalized.length > 0 ? normalized : ["misc"];
+}
+
+function normalizeExamMetadataAndTags(examMd: string): string {
+  const jsonBlockRegex = /```json\n([\s\S]*?)\n```/g;
+  const matches = [...examMd.matchAll(jsonBlockRegex)];
+
+  if (matches.length === 0) {
+    return examMd;
+  }
+
+  let questionCount = 0;
+  let totalPoints = 0;
+  const updates: Array<{ start: number; end: number; text: string }> = [];
+
+  let metadata: Record<string, unknown> | null = null;
+  let metadataMatch: RegExpMatchArray | null = null;
+
+  for (let index = 0; index < matches.length; index++) {
+    const match = matches[index];
+    const jsonText = match[1];
+    let parsed: Record<string, unknown>;
+
+    try {
+      parsed = JSON.parse(jsonText) as Record<string, unknown>;
+    } catch {
+      continue;
+    }
+
+    const hasProblemId = Object.prototype.hasOwnProperty.call(
+      parsed,
+      "problem_id",
+    );
+
+    if (index === 0 && !hasProblemId) {
+      metadata = parsed;
+      metadataMatch = match;
+      continue;
+    }
+
+    if (!hasProblemId) {
+      continue;
+    }
+
+    questionCount += 1;
+    if (typeof parsed.points === "number" && Number.isFinite(parsed.points)) {
+      totalPoints += parsed.points;
+    }
+
+    const normalizedTags = normalizeTags(parsed.tags);
+    const tagsChanged =
+      JSON.stringify(normalizedTags) !== JSON.stringify(parsed.tags);
+
+    if (tagsChanged) {
+      parsed.tags = normalizedTags;
+      const newBlock = `\`\`\`json\n${JSON.stringify(parsed, null, 2)}\n\`\`\``;
+      const start = match.index ?? 0;
+      updates.push({ start, end: start + match[0].length, text: newBlock });
+    }
+  }
+
+  if (metadata && metadataMatch && questionCount > 0) {
+    let metadataChanged = false;
+    const numQuestions = metadata.num_questions;
+    if (numQuestions !== questionCount) {
+      metadata.num_questions = questionCount;
+      metadataChanged = true;
+    }
+
+    const scoreTotalRaw = metadata.score_total;
+    const scoreTotal =
+      typeof scoreTotalRaw === "number" ? scoreTotalRaw : Number(scoreTotalRaw);
+    if (!Number.isFinite(scoreTotal) || scoreTotal !== totalPoints) {
+      metadata.score_total = totalPoints;
+      metadataChanged = true;
+    }
+
+    if (metadataChanged) {
+      const newBlock = `\`\`\`json\n${JSON.stringify(metadata, null, 2)}\n\`\`\``;
+      const start = metadataMatch.index ?? 0;
+      updates.push({
+        start,
+        end: start + metadataMatch[0].length,
+        text: newBlock,
+      });
+    }
+  }
+
+  if (updates.length === 0) {
+    return examMd;
+  }
+
+  const sortedUpdates = updates.sort((a, b) => b.start - a.start);
+  let updatedExamMd = examMd;
+
+  for (const update of sortedUpdates) {
+    updatedExamMd =
+      updatedExamMd.slice(0, update.start) +
+      update.text +
+      updatedExamMd.slice(update.end);
+  }
+
+  return updatedExamMd;
 }
 
 async function createOrGetPullRequest(params: {
@@ -321,6 +488,9 @@ CRITICAL RULES - READ CAREFULLY:
 2. DO NOT include "choices" field for Freeform questions - only use it for ExactMatch
 3. The solutions file is ONLY used to determine correct answers for the JSON metadata, NOT to be included in question text
 4. All "points" values must be integers. If the source uses fractional points, rescale all question points and score_total by the smallest factor to make them integers.
+5. Tags MUST match ^[a-z0-9-]+$ (lowercase, digits, hyphens only). Replace spaces, underscores, or slashes with hyphens and remove other punctuation.
+6. num_questions MUST equal the number of questions you output (count each sub-part like 8a, 8b as 1). Recount after writing questions and update metadata.
+7. Every question MUST have a non-empty "answer" in its JSON block. Use the solutions text to fill it; never leave it blank.
 
 METADATA INFERENCE (for fields not provided):
 - exam_id: Generate from course code, semester, year, and exam type. Use lowercase with underscores.
@@ -333,7 +503,7 @@ METADATA INFERENCE (for fields not provided):
 - institution: University name (e.g., "University of Wisconsin-Madison")
 - year: Extract from exam date
 - score_total: Sum of all question points (calculate, don't assume)
-- num_questions: Count of questions
+- num_questions: Count of questions (count each sub-question like 8a, 8b as 1). Must equal the number of question JSON blocks in the output.
 
 FORMAT:
 
@@ -408,7 +578,7 @@ CRITICAL REMINDERS:
 - Question text = ONLY the question as a student would see it on the exam
 - NO answers, NO solutions, NO student responses in the question text body
 - The "answer" field in JSON metadata stores the correct answer (from solutions file)
-- Tags should be lowercase with hyphens (e.g., "virtual-memory")
+- Tags MUST match ^[a-z0-9-]+$ (e.g., "virtual-memory"). Bad: "os/161", "ll_sc". Good: "os-161", "ll-sc".
 - Use "point" (singular) when points=1, "points" (plural) otherwise
 
 MULTI-PART QUESTIONS:
@@ -456,7 +626,7 @@ export const POST: APIRoute = async ({ request }) => {
         const githubToken = formData.get("githubToken") as string;
 
         const hasGitHub = !!(githubUsername && githubToken && repoPath);
-        const totalSteps = hasGitHub ? 11 : 8;
+        const totalSteps = hasGitHub ? 12 : 9;
 
         if (!apiKey) {
           log(
@@ -570,12 +740,18 @@ Please generate the exam.md file following the exact format specified. Remember 
           `Format-checked: ${formattedExamMd.length.toLocaleString()} characters`,
         );
 
-        assertIntegerPoints(formattedExamMd);
+        const finalExamMd = normalizeExamMetadataAndTags(formattedExamMd);
+        if (finalExamMd !== formattedExamMd) {
+          log("Normalized tags/num_questions/score_total to match schema");
+        }
+
+        assertIntegerPoints(finalExamMd);
+        assertNonEmptyAnswers(finalExamMd);
 
         // Extract exam_id from generated content if not provided
         let finalExamId = examId;
         if (!finalExamId) {
-          const match = formattedExamMd.match(/"exam_id"\s*:\s*"([^"]+)"/);
+          const match = finalExamMd.match(/"exam_id"\s*:\s*"([^"]+)"/);
           if (match) {
             finalExamId = match[1];
           } else {
@@ -609,11 +785,7 @@ Please generate the exam.md file following the exact format specified. Remember 
         logRaw(`\n── Step 7/${totalSteps}: Write Files ──`);
 
         // Write exam.md
-        await fs.writeFile(
-          path.join(examDir, "exam.md"),
-          formattedExamMd,
-          "utf-8",
-        );
+        await fs.writeFile(path.join(examDir, "exam.md"), finalExamMd, "utf-8");
         log(`Wrote: exam.md`);
 
         // Write the solutions file (following benchmark convention)
@@ -648,22 +820,57 @@ Please generate the exam.md file following the exact format specified. Remember 
           if (stderr?.trim()) {
             log(stderr.trim());
           }
-          log("prepare_dataset.py completed");
+          log("prepare.py completed");
         } catch (error: unknown) {
           const errorMsg =
             error instanceof Error ? error.message : String(error);
-          log(`prepare_dataset.py failed: ${errorMsg}`);
+          const execError = error as { stdout?: string; stderr?: string };
+          if (execError.stdout?.trim()) {
+            log(execError.stdout.trim());
+          }
+          if (execError.stderr?.trim()) {
+            log(execError.stderr.trim());
+          }
+          log(`prepare.py failed: ${errorMsg}`);
           throw new Error(`Dataset preparation failed: ${errorMsg}`);
+        }
+
+        // Step 9: Validate dataset schema before any git operations
+        logRaw(`\n── Step 9/${totalSteps}: Validate Dataset Schema ──`);
+        try {
+          const { stdout, stderr } = await execAsync(
+            "python3 -m pytest tests/test_data_schema.py -q",
+            { cwd: courseExamBenchPath },
+          );
+          if (stdout?.trim()) {
+            log(stdout.trim());
+          }
+          if (stderr?.trim()) {
+            log(stderr.trim());
+          }
+          log("data schema tests passed");
+        } catch (error: unknown) {
+          const errorMsg =
+            error instanceof Error ? error.message : String(error);
+          const execError = error as { stdout?: string; stderr?: string };
+          if (execError.stdout?.trim()) {
+            log(execError.stdout.trim());
+          }
+          if (execError.stderr?.trim()) {
+            log(execError.stderr.trim());
+          }
+          log(`data schema tests failed: ${errorMsg}`);
+          throw new Error(`Data schema tests failed: ${errorMsg}`);
         }
 
         // GitHub integration: create branch and push commit
         if (hasGitHub) {
           // Extract exam info for branch name
-          const examNameMatch = formattedExamMd.match(
+          const examNameMatch = finalExamMd.match(
             /"test_paper_name"\s*:\s*"([^"]+)"/,
           );
-          const courseMatch = formattedExamMd.match(/"course"\s*:\s*"([^"]+)"/);
-          const yearMatch = formattedExamMd.match(/"year"\s*:\s*(\d+)/);
+          const courseMatch = finalExamMd.match(/"course"\s*:\s*"([^"]+)"/);
+          const yearMatch = finalExamMd.match(/"year"\s*:\s*(\d+)/);
 
           // Generate branch name from exam metadata
           let branchName = finalExamId.replace(/_/g, "-");
@@ -702,8 +909,8 @@ Please generate the exam.md file following the exact format specified. Remember 
             `exam-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
           );
 
-          // Step 9: Create git branch
-          logRaw(`\n── Step 9/${totalSteps}: Create Git Branch ──`);
+          // Step 10: Create git branch
+          logRaw(`\n── Step 10/${totalSteps}: Create Git Branch ──`);
           log(`Branch: ${branchName}`);
           try {
             // Fetch latest from origin
@@ -732,8 +939,8 @@ Please generate the exam.md file following the exact format specified. Remember 
             throw new Error(`Failed to create branch/worktree: ${errorMsg}`);
           }
 
-          // Step 10: Commit and push
-          logRaw(`\n── Step 10/${totalSteps}: Push to GitHub ──`);
+          // Step 11: Commit and push
+          logRaw(`\n── Step 11/${totalSteps}: Push to GitHub ──`);
           try {
             // Copy exam files to the worktree
             const worktreeExamDir = path.join(
@@ -786,8 +993,8 @@ Please generate the exam.md file following the exact format specified. Remember 
             }
           }
 
-          // Step 11: Create pull request
-          logRaw(`\n── Step 11/${totalSteps}: Create Pull Request ──`);
+          // Step 12: Create pull request
+          logRaw(`\n── Step 12/${totalSteps}: Create Pull Request ──`);
           try {
             const prTitle = await buildPullRequestTitle({
               apiKey,
