@@ -66,6 +66,12 @@ FORMAT REQUIREMENTS:
 If the input is already correctly formatted, output it unchanged.
 Output ONLY the corrected exam.md content, no explanations or commentary.`;
 
+const PR_BODY_SYSTEM_PROMPT = `You write GitHub pull request descriptions.
+
+Fill out the template exactly. Keep the section headings and checklist intact.
+Use concise, factual sentences. Do not add extra sections or commentary.
+Output ONLY the completed template.`;
+
 function getExamPath(repoPath?: string): string {
   if (repoPath) {
     return path.join(repoPath, "benchmarks", "courseexam_bench", "data", "raw");
@@ -140,6 +146,69 @@ async function createOrGetPullRequest(params: {
   }
 
   return created.html_url;
+}
+
+async function buildPullRequestBody(params: {
+  apiKey: string;
+  examTitle: string;
+  examId: string;
+  examDir: string;
+  solutionFileName: string;
+  referenceFileNames: string[];
+}): Promise<string> {
+  const {
+    apiKey,
+    examTitle,
+    examId,
+    examDir,
+    solutionFileName,
+    referenceFileNames,
+  } = params;
+
+  const template = `## Description
+
+Brief description of what this PR does.
+
+## Changes
+
+- Change 1
+- Change 2
+- Change 3
+
+## Testing
+
+How was this tested?
+
+## Checklist
+
+- [ ] Tests pass locally
+- [ ] Code follows project style guidelines
+- [ ] Documentation updated (if needed)
+`;
+
+  const refList =
+    referenceFileNames.length > 0 ? referenceFileNames.join(", ") : "None";
+
+  const userPrompt = `Fill the template using this context:
+- Exam title: ${examTitle}
+- Exam ID: ${examId}
+- Exam directory: ${examDir}
+- Solutions file: ${solutionFileName}
+- Reference files: ${refList}
+- Testing performed: python3 courseexam/prepare.py
+
+Template:
+${template}
+`;
+
+  return callOpenAI(
+    [
+      { role: "system", content: PR_BODY_SYSTEM_PROMPT },
+      { role: "user", content: userPrompt },
+    ],
+    apiKey,
+    MODELS.judge,
+  );
 }
 
 const EXAM_SYSTEM_PROMPT = `You are an expert at converting exam documents into a structured markdown format for the CourseExam benchmark.
@@ -621,12 +690,20 @@ Please generate the exam.md file following the exact format specified. Remember 
           // Step 11: Create pull request
           logRaw(`\n── Step 11/${totalSteps}: Create Pull Request ──`);
           try {
+            const prBody = await buildPullRequestBody({
+              apiKey,
+              examTitle,
+              examId: finalExamId,
+              examDir,
+              solutionFileName: solutionsFile.name,
+              referenceFileNames: referenceFiles.map((refFile) => refFile.name),
+            });
             const prUrl = await createOrGetPullRequest({
               githubUsername,
               githubToken,
               branchName,
               title: `Add ${examTitle}`,
-              body: `Adds exam ${finalExamId}.`,
+              body: prBody,
             });
             log(`PR: ${prUrl}`);
           } catch (error: unknown) {
