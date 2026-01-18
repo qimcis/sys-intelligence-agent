@@ -32,6 +32,7 @@ CRITICAL CONTENT CHECKS - FIX THESE:
 14. VERIFY num_questions matches actual question count (count all problem_ids including sub-parts like 8a, 8b as separate questions).
 15. REMOVE any skipped/excluded questions entirely (e.g., "Skipped", "Excluded", or points=0). Do NOT include them in the output.
 16. UPDATE score_total and num_questions after removing any skipped/excluded questions.
+17. ENSURE all "points" values are integers. If any are fractional, rescale all question points and score_total by the smallest factor to make them integers (e.g., 0.5 -> multiply all points by 2). Update any point allocations in llm_judge_instructions to use integers.
 
 EXAMPLE OF BAD (fix this):
 ## Question 1 [5 points]
@@ -72,6 +73,19 @@ Fill out the template exactly. Keep the section headings and checklist intact.
 Use concise, factual sentences. Do not add extra sections or commentary.
 Output ONLY the completed template.`;
 
+const PR_TITLE_SYSTEM_PROMPT = `You generate GitHub pull request titles.
+
+Output EXACTLY this format:
+add <course> <season> <year> <exam type>
+
+Rules:
+- Use lowercase.
+- Course should be a short code (e.g., comp3000, cs537).
+- Season must be one of: fall, winter, spring, summer.
+- Year must be 4 digits.
+- Exam type must be "final", "midterm", "quiz", or "exam".
+- Output ONLY the title line, no punctuation or quotes.`;
+
 function getExamPath(repoPath?: string): string {
   if (repoPath) {
     return path.join(repoPath, "benchmarks", "courseexam_bench", "data", "raw");
@@ -82,6 +96,52 @@ function getExamPath(repoPath?: string): string {
 function getCourseExamBenchPath(repoPath?: string): string {
   const basePath = repoPath || BENCHMARK_REPO_PATH;
   return path.join(basePath, "benchmarks", "courseexam_bench");
+}
+
+function buildPullRequestTitleFallback(examId: string): string {
+  const tokens = examId.toLowerCase().split("_");
+  const seasons = new Set(["fall", "winter", "spring", "summer", "autumn"]);
+  const seasonIndex = tokens.findIndex((token) => seasons.has(token));
+
+  if (seasonIndex > 0 && seasonIndex + 2 < tokens.length) {
+    const course = tokens.slice(0, seasonIndex).join(" ");
+    const season = tokens[seasonIndex];
+    const year = tokens[seasonIndex + 1];
+    const examType = tokens.slice(seasonIndex + 2).join(" ");
+
+    if (/^\d{4}$/.test(year) && examType) {
+      return `add ${course} ${season} ${year} ${examType}`.replace(/\s+/g, " ");
+    }
+  }
+
+  return `add ${examId.replace(/_/g, " ")}`.replace(/\s+/g, " ");
+}
+
+function assertIntegerPoints(examMd: string): void {
+  const jsonBlockRegex = /```json\n([\s\S]*?)\n```/g;
+  const matches = examMd.matchAll(jsonBlockRegex);
+
+  for (const match of matches) {
+    const jsonText = match[1];
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = JSON.parse(jsonText) as Record<string, unknown>;
+    } catch {
+      continue;
+    }
+
+    if (!Object.prototype.hasOwnProperty.call(parsed, "problem_id")) {
+      continue;
+    }
+
+    const points = parsed.points;
+    if (typeof points === "number" && !Number.isInteger(points)) {
+      const problemId = parsed.problem_id;
+      throw new Error(
+        `Non-integer points for problem_id ${problemId}: ${points}`,
+      );
+    }
+  }
 }
 
 async function createOrGetPullRequest(params: {
@@ -146,6 +206,42 @@ async function createOrGetPullRequest(params: {
   }
 
   return created.html_url;
+}
+
+async function buildPullRequestTitle(params: {
+  apiKey: string;
+  examId: string;
+  examTitle: string;
+  course?: string;
+  year?: string;
+}): Promise<string> {
+  const { apiKey, examId, examTitle, course, year } = params;
+  const userPrompt = `Context:
+- exam_id: ${examId}
+- test_paper_name: ${examTitle}
+- course: ${course || "unknown"}
+- year: ${year || "unknown"}
+
+Generate the title.`;
+
+  const title = await callOpenAI(
+    [
+      { role: "system", content: PR_TITLE_SYSTEM_PROMPT },
+      { role: "user", content: userPrompt },
+    ],
+    apiKey,
+    MODELS.judge,
+  );
+
+  const cleaned = title.trim().split("\n")[0].toLowerCase();
+  const isValid = /^add [a-z0-9]+ [a-z]+ \d{4} (final|midterm|quiz|exam)$/.test(
+    cleaned,
+  );
+  if (!isValid) {
+    return buildPullRequestTitleFallback(examId);
+  }
+
+  return cleaned;
 }
 
 async function buildPullRequestBody(params: {
@@ -224,6 +320,7 @@ CRITICAL RULES - READ CAREFULLY:
 1. DO NOT include answers, solutions, or student responses in the question text
 2. DO NOT include "choices" field for Freeform questions - only use it for ExactMatch
 3. The solutions file is ONLY used to determine correct answers for the JSON metadata, NOT to be included in question text
+4. All "points" values must be integers. If the source uses fractional points, rescale all question points and score_total by the smallest factor to make them integers.
 
 METADATA INFERENCE (for fields not provided):
 - exam_id: Generate from course code, semester, year, and exam type. Use lowercase with underscores.
@@ -473,6 +570,8 @@ Please generate the exam.md file following the exact format specified. Remember 
           `Format-checked: ${formattedExamMd.length.toLocaleString()} characters`,
         );
 
+        assertIntegerPoints(formattedExamMd);
+
         // Extract exam_id from generated content if not provided
         let finalExamId = examId;
         if (!finalExamId) {
@@ -690,6 +789,13 @@ Please generate the exam.md file following the exact format specified. Remember 
           // Step 11: Create pull request
           logRaw(`\n── Step 11/${totalSteps}: Create Pull Request ──`);
           try {
+            const prTitle = await buildPullRequestTitle({
+              apiKey,
+              examId: finalExamId,
+              examTitle,
+              course: courseMatch?.[1],
+              year: yearMatch?.[1],
+            });
             const prBody = await buildPullRequestBody({
               apiKey,
               examTitle,
@@ -702,7 +808,7 @@ Please generate the exam.md file following the exact format specified. Remember 
               githubUsername,
               githubToken,
               branchName,
-              title: `Add ${examTitle}`,
+              title: prTitle,
               body: prBody,
             });
             log(`PR: ${prUrl}`);
