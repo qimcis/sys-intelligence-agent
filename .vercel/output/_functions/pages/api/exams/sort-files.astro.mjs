@@ -1,6 +1,5 @@
-import type { APIRoute } from "astro";
-import { callOpenAI, MODELS } from "../../../lib/openai-client";
-import { checkRateLimit } from "../../../lib/rate-limit";
+import { c as checkRateLimit, a as callOpenAI, M as MODELS } from '../../../chunks/rate-limit_BV7kvadu.mjs';
+export { renderers } from '../../../renderers.mjs';
 
 const SORT_SYSTEM_PROMPT = `You are an expert at analyzing exam file names and organizing them for processing.
 
@@ -48,45 +47,41 @@ Rules:
 - inferred_name: Extract semester, year, and exam type (e.g., "Fall 2018 Midterm", "Winter 2019 Final")
 
 Output ONLY valid JSON, no explanations.`;
-
-export const POST: APIRoute = async ({ request }) => {
+const POST = async ({ request }) => {
   const clientIp = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
-  const { allowed, retryAfter } = checkRateLimit(clientIp, 60_000, 10);
+  const { allowed, retryAfter } = checkRateLimit(clientIp, 6e4, 10);
   if (!allowed) {
     return new Response(JSON.stringify({ error: "Too many requests" }), {
       status: 429,
-      headers: { "Content-Type": "application/json", "Retry-After": String(retryAfter) },
+      headers: { "Content-Type": "application/json", "Retry-After": String(retryAfter) }
     });
   }
-
   try {
     const { fileNames, apiKey } = await request.json();
-
     if (!apiKey) {
       return new Response(JSON.stringify({ error: "No API key provided" }), {
         status: 400,
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json" }
       });
     }
-
     if (!fileNames || !Array.isArray(fileNames) || fileNames.length === 0) {
       return new Response(JSON.stringify({ error: "No files provided" }), {
         status: 400,
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json" }
       });
     }
+    const userPrompt = `Here are the uploaded file names:
+${fileNames.map((f, i) => `${i + 1}. ${f}`).join("\n")}
 
-    const userPrompt = `Here are the uploaded file names:\n${fileNames.map((f: string, i: number) => `${i + 1}. ${f}`).join("\n")}\n\nPlease analyze these files and group them into exam/solution pairs.`;
-
+Please analyze these files and group them into exam/solution pairs.`;
     const response = await callOpenAI(
       [
         { role: "system", content: SORT_SYSTEM_PROMPT },
-        { role: "user", content: userPrompt },
+        { role: "user", content: userPrompt }
       ],
       apiKey,
-      MODELS.judge,
+      MODELS.judge
     );
-
     let result;
     try {
       const jsonMatch = response.match(/\{[\s\S]*\}/);
@@ -98,18 +93,26 @@ export const POST: APIRoute = async ({ request }) => {
     } catch {
       return new Response(
         JSON.stringify({ error: "Failed to parse AI response", raw: response }),
-        { status: 500, headers: { "Content-Type": "application/json" } },
+        { status: 500, headers: { "Content-Type": "application/json" } }
       );
     }
-
     return new Response(JSON.stringify(result), {
       status: 200,
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json" }
     });
   } catch (error) {
     return new Response(JSON.stringify({ error: String(error) }), {
       status: 500,
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json" }
     });
   }
 };
+
+const _page = /*#__PURE__*/Object.freeze(/*#__PURE__*/Object.defineProperty({
+  __proto__: null,
+  POST
+}, Symbol.toStringTag, { value: 'Module' }));
+
+const page = () => _page;
+
+export { page };

@@ -1,15 +1,93 @@
-import type { APIRoute } from "astro";
-import { extractTextFromFile } from "../../../lib/pdf-utils";
-import { callOpenAI, MODELS } from "../../../lib/openai-client";
-import { BENCHMARK_REPO_PATH, COURSEEXAM_PATH } from "../../../lib/config";
-import { checkRateLimit } from "../../../lib/rate-limit";
-import fs from "fs/promises";
-import path from "path";
-import { exec } from "child_process";
-import { promisify } from "util";
+import { pdf } from 'pdf-to-img';
+import { c as checkRateLimit, a as callOpenAI, M as MODELS } from '../../../chunks/rate-limit_BV7kvadu.mjs';
+import { C as COURSEEXAM_PATH, B as BENCHMARK_REPO_PATH } from '../../../chunks/config_BkSRtLkd.mjs';
+import fs from 'fs/promises';
+import path from 'path';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+export { renderers } from '../../../renderers.mjs';
+
+const MIN_TEXT_LENGTH = 100;
+async function extractTextFromPdf(buffer) {
+  try {
+    const { default: pdfParse } = await import('pdf-parse/lib/pdf-parse.js');
+    const data = await pdfParse(buffer);
+    return data.text;
+  } catch (error) {
+    throw new Error(`Failed to parse PDF: ${error}`);
+  }
+}
+async function extractTextFromPdfWithOcr(buffer, apiKey) {
+  let extractedText = "";
+  try {
+    extractedText = await extractTextFromPdf(buffer);
+  } catch {
+  }
+  if (extractedText.trim().length >= MIN_TEXT_LENGTH) {
+    return extractedText;
+  }
+  console.log("PDF appears to be image-based, using OCR...");
+  const pages = [];
+  let pageNum = 0;
+  const pdfDocument = await pdf(buffer, { scale: 2 });
+  for await (const image of pdfDocument) {
+    pageNum++;
+    const base64Image = image.toString("base64");
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        model: "gpt-4o",
+        messages: [
+          {
+            role: "user",
+            content: [
+              {
+                type: "text",
+                text: "Extract ALL text from this image exactly as it appears. Preserve the original formatting, layout, and structure as much as possible. Include all questions, answers, headers, footers, and any other text. Output ONLY the extracted text, nothing else."
+              },
+              {
+                type: "image_url",
+                image_url: {
+                  url: `data:image/png;base64,${base64Image}`,
+                  detail: "high"
+                }
+              }
+            ]
+          }
+        ],
+        max_tokens: 4096
+      })
+    });
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(`OpenAI Vision API error: ${error}`);
+    }
+    const result = await response.json();
+    const pageText = result.choices?.[0]?.message?.content || "";
+    pages.push(`--- Page ${pageNum} ---
+${pageText}`);
+  }
+  return pages.join("\n\n");
+}
+async function extractTextFromFile(file, apiKey) {
+  const buffer = Buffer.from(await file.arrayBuffer());
+  if (file.name.endsWith(".pdf")) {
+    if (apiKey) {
+      return extractTextFromPdfWithOcr(buffer, apiKey);
+    }
+    return extractTextFromPdf(buffer);
+  } else if (file.name.endsWith(".txt") || file.name.endsWith(".md")) {
+    return buffer.toString("utf-8");
+  } else {
+    throw new Error(`Unsupported file type: ${file.name}`);
+  }
+}
 
 const execAsync = promisify(exec);
-
 const JUDGE_SYSTEM_PROMPT = `You are a meticulous judge that validates and corrects exam markdown files for the CourseExam benchmark.
 
 Your task is to review the generated exam.md content and fix ALL issues:
@@ -50,7 +128,6 @@ If you find errors, output the CORRECTED exam.md content.
 If everything is correct, output the original content unchanged.
 
 Output ONLY the exam.md content, no explanations or commentary.`;
-
 const FORMAT_SYSTEM_PROMPT = `You are a strict formatter for CourseExam exam.md files.
 
 Your job is to fix formatting only so the file can be parsed by prepare_dataset.py.
@@ -69,13 +146,11 @@ FORMAT REQUIREMENTS:
 
 If the input is already correctly formatted, output it unchanged.
 Output ONLY the corrected exam.md content, no explanations or commentary.`;
-
 const PR_BODY_SYSTEM_PROMPT = `You write GitHub pull request descriptions.
 
 Fill out the template exactly. Keep the section headings and checklist intact.
 Use concise, factual sentences. Do not add extra sections or commentary.
 Output ONLY the completed template.`;
-
 const PR_TITLE_SYSTEM_PROMPT = `You generate GitHub pull request titles.
 
 Output EXACTLY this format:
@@ -88,186 +163,152 @@ Rules:
 - Year must be 4 digits.
 - Exam type must be "final", "midterm", "quiz", or "exam".
 - Output ONLY the title line, no punctuation or quotes.`;
-
-function getExamPath(repoPath?: string): string {
+function getExamPath(repoPath) {
   if (repoPath) {
     return path.join(repoPath, "benchmarks", "courseexam_bench", "data", "raw");
   }
   return COURSEEXAM_PATH;
 }
-
-function getCourseExamBenchPath(repoPath?: string): string {
+function getCourseExamBenchPath(repoPath) {
   const basePath = repoPath || BENCHMARK_REPO_PATH;
   return path.join(basePath, "benchmarks", "courseexam_bench");
 }
-
-function buildPullRequestTitleFallback(examId: string): string {
+function buildPullRequestTitleFallback(examId) {
   const tokens = examId.toLowerCase().split("_");
-  const seasons = new Set(["fall", "winter", "spring", "summer", "autumn"]);
+  const seasons = /* @__PURE__ */ new Set(["fall", "winter", "spring", "summer", "autumn"]);
   const seasonIndex = tokens.findIndex((token) => seasons.has(token));
-
   if (seasonIndex > 0 && seasonIndex + 2 < tokens.length) {
     const course = tokens.slice(0, seasonIndex).join(" ");
     const season = tokens[seasonIndex];
     const year = tokens[seasonIndex + 1];
     const examType = tokens.slice(seasonIndex + 2).join(" ");
-
     if (/^\d{4}$/.test(year) && examType) {
       return `add ${course} ${season} ${year} ${examType}`.replace(/\s+/g, " ");
     }
   }
-
   return `add ${examId.replace(/_/g, " ")}`.replace(/\s+/g, " ");
 }
-
-function assertIntegerPoints(examMd: string): void {
+function assertIntegerPoints(examMd) {
   const jsonBlockRegex = /```json\n([\s\S]*?)\n```/g;
   const matches = examMd.matchAll(jsonBlockRegex);
-
   for (const match of matches) {
     const jsonText = match[1];
-    let parsed: Record<string, unknown>;
+    let parsed;
     try {
-      parsed = JSON.parse(jsonText) as Record<string, unknown>;
+      parsed = JSON.parse(jsonText);
     } catch {
       continue;
     }
-
     if (!Object.prototype.hasOwnProperty.call(parsed, "problem_id")) {
       continue;
     }
-
     const points = parsed.points;
     if (typeof points === "number" && !Number.isInteger(points)) {
       const problemId = parsed.problem_id;
       throw new Error(
-        `Non-integer points for problem_id ${problemId}: ${points}`,
+        `Non-integer points for problem_id ${problemId}: ${points}`
       );
     }
   }
 }
-
-function assertNonEmptyAnswers(examMd: string): void {
+function assertNonEmptyAnswers(examMd) {
   const jsonBlockRegex = /```json\n([\s\S]*?)\n```/g;
   const matches = examMd.matchAll(jsonBlockRegex);
-  const missingAnswers: string[] = [];
-
+  const missingAnswers = [];
   for (const match of matches) {
     const jsonText = match[1];
-    let parsed: Record<string, unknown>;
+    let parsed;
     try {
-      parsed = JSON.parse(jsonText) as Record<string, unknown>;
+      parsed = JSON.parse(jsonText);
     } catch {
       continue;
     }
-
     if (!Object.prototype.hasOwnProperty.call(parsed, "problem_id")) {
       continue;
     }
-
     const answer = parsed.answer;
     if (typeof answer !== "string" || answer.trim().length === 0) {
       missingAnswers.push(String(parsed.problem_id ?? "?"));
     }
   }
-
   if (missingAnswers.length > 0) {
     throw new Error(
-      `Missing or empty answers for problem_id(s): ${missingAnswers.join(", ")}`,
+      `Missing or empty answers for problem_id(s): ${missingAnswers.join(", ")}`
     );
   }
 }
-
-function normalizeTags(rawTags: unknown): string[] {
+function normalizeTags(rawTags) {
   if (!Array.isArray(rawTags)) {
     return ["misc"];
   }
-
-  const normalized: string[] = [];
-  const seen = new Set<string>();
-
+  const normalized = [];
+  const seen = /* @__PURE__ */ new Set();
   for (const tag of rawTags) {
     if (typeof tag !== "string") {
       continue;
     }
-
     let cleaned = tag.toLowerCase();
     cleaned = cleaned.replace(/[\s_\/]+/g, "-");
     cleaned = cleaned.replace(/[^a-z0-9-]/g, "");
     cleaned = cleaned.replace(/-+/g, "-");
     cleaned = cleaned.replace(/^-+|-+$/g, "");
-
     if (!cleaned) {
       continue;
     }
-
     if (!seen.has(cleaned)) {
       seen.add(cleaned);
       normalized.push(cleaned);
     }
   }
-
   return normalized.length > 0 ? normalized : ["misc"];
 }
-
-function normalizeExamMetadataAndTags(examMd: string): string {
+function normalizeExamMetadataAndTags(examMd) {
   const jsonBlockRegex = /```json\n([\s\S]*?)\n```/g;
   const matches = [...examMd.matchAll(jsonBlockRegex)];
-
   if (matches.length === 0) {
     return examMd;
   }
-
   let questionCount = 0;
   let totalPoints = 0;
-  const updates: Array<{ start: number; end: number; text: string }> = [];
-
-  let metadata: Record<string, unknown> | null = null;
-  let metadataMatch: RegExpMatchArray | null = null;
-
+  const updates = [];
+  let metadata = null;
+  let metadataMatch = null;
   for (let index = 0; index < matches.length; index++) {
     const match = matches[index];
     const jsonText = match[1];
-    let parsed: Record<string, unknown>;
-
+    let parsed;
     try {
-      parsed = JSON.parse(jsonText) as Record<string, unknown>;
+      parsed = JSON.parse(jsonText);
     } catch {
       continue;
     }
-
     const hasProblemId = Object.prototype.hasOwnProperty.call(
       parsed,
-      "problem_id",
+      "problem_id"
     );
-
     if (index === 0 && !hasProblemId) {
       metadata = parsed;
       metadataMatch = match;
       continue;
     }
-
     if (!hasProblemId) {
       continue;
     }
-
     questionCount += 1;
     if (typeof parsed.points === "number" && Number.isFinite(parsed.points)) {
       totalPoints += parsed.points;
     }
-
     const normalizedTags = normalizeTags(parsed.tags);
-    const tagsChanged =
-      JSON.stringify(normalizedTags) !== JSON.stringify(parsed.tags);
-
+    const tagsChanged = JSON.stringify(normalizedTags) !== JSON.stringify(parsed.tags);
     if (tagsChanged) {
       parsed.tags = normalizedTags;
-      const newBlock = `\`\`\`json\n${JSON.stringify(parsed, null, 2)}\n\`\`\``;
+      const newBlock = `\`\`\`json
+${JSON.stringify(parsed, null, 2)}
+\`\`\``;
       const start = match.index ?? 0;
       updates.push({ start, end: start + match[0].length, text: newBlock });
     }
   }
-
   if (metadata && metadataMatch && questionCount > 0) {
     let metadataChanged = false;
     const numQuestions = metadata.num_questions;
@@ -275,79 +316,60 @@ function normalizeExamMetadataAndTags(examMd: string): string {
       metadata.num_questions = questionCount;
       metadataChanged = true;
     }
-
     const scoreTotalRaw = metadata.score_total;
-    const scoreTotal =
-      typeof scoreTotalRaw === "number" ? scoreTotalRaw : Number(scoreTotalRaw);
+    const scoreTotal = typeof scoreTotalRaw === "number" ? scoreTotalRaw : Number(scoreTotalRaw);
     if (!Number.isFinite(scoreTotal) || scoreTotal !== totalPoints) {
       metadata.score_total = totalPoints;
       metadataChanged = true;
     }
-
     if (metadataChanged) {
-      const newBlock = `\`\`\`json\n${JSON.stringify(metadata, null, 2)}\n\`\`\``;
+      const newBlock = `\`\`\`json
+${JSON.stringify(metadata, null, 2)}
+\`\`\``;
       const start = metadataMatch.index ?? 0;
       updates.push({
         start,
         end: start + metadataMatch[0].length,
-        text: newBlock,
+        text: newBlock
       });
     }
   }
-
   if (updates.length === 0) {
     return examMd;
   }
-
   const sortedUpdates = updates.sort((a, b) => b.start - a.start);
   let updatedExamMd = examMd;
-
   for (const update of sortedUpdates) {
-    updatedExamMd =
-      updatedExamMd.slice(0, update.start) +
-      update.text +
-      updatedExamMd.slice(update.end);
+    updatedExamMd = updatedExamMd.slice(0, update.start) + update.text + updatedExamMd.slice(update.end);
   }
-
   return updatedExamMd;
 }
-
-async function createOrGetPullRequest(params: {
-  githubUsername: string;
-  githubToken: string;
-  branchName: string;
-  title: string;
-  body: string;
-}): Promise<string> {
+async function createOrGetPullRequest(params) {
   const { githubUsername, githubToken, branchName, title, body } = params;
   const owner = "sys-intelligence";
   const repo = "system-intelligence-benchmark";
   const base = "main";
   const head = `${githubUsername}:${branchName}`;
   const apiBase = `https://api.github.com/repos/${owner}/${repo}`;
-
   const headers = {
     Accept: "application/vnd.github+json",
     Authorization: `Bearer ${githubToken}`,
-    "X-GitHub-Api-Version": "2022-11-28",
+    "X-GitHub-Api-Version": "2022-11-28"
   };
-
   const listResponse = await fetch(
     `${apiBase}/pulls?state=open&base=${base}&head=${encodeURIComponent(head)}`,
-    { headers },
+    { headers }
   );
   if (!listResponse.ok) {
     const errorText = await listResponse.text();
     throw new Error(
-      `GitHub PR lookup failed: ${listResponse.status} - ${errorText}`,
+      `GitHub PR lookup failed: ${listResponse.status} - ${errorText}`
     );
   }
-
-  const existing = (await listResponse.json()) as Array<{ html_url?: string }>;
+  const existing = await listResponse.json();
   if (existing.length > 0 && existing[0]?.html_url) {
     return existing[0].html_url;
   }
-
   const createResponse = await fetch(`${apiBase}/pulls`, {
     method: "POST",
     headers,
@@ -357,32 +379,22 @@ async function createOrGetPullRequest(params: {
       base,
       body,
       draft: true,
-      maintainer_can_modify: true,
-    }),
+      maintainer_can_modify: true
+    })
   });
-
   if (!createResponse.ok) {
     const errorText = await createResponse.text();
     throw new Error(
-      `GitHub PR create failed: ${createResponse.status} - ${errorText}`,
+      `GitHub PR create failed: ${createResponse.status} - ${errorText}`
     );
   }
-
-  const created = (await createResponse.json()) as { html_url?: string };
+  const created = await createResponse.json();
   if (!created?.html_url) {
     throw new Error("GitHub PR create response missing html_url");
   }
-
   return created.html_url;
 }
-
-async function buildPullRequestTitle(params: {
-  apiKey: string;
-  examId: string;
-  examTitle: string;
-  course?: string;
-  year?: string;
-}): Promise<string> {
+async function buildPullRequestTitle(params) {
   const { apiKey, examId, examTitle, course, year } = params;
   const userPrompt = `Context:
 - exam_id: ${examId}
@@ -391,44 +403,32 @@ async function buildPullRequestTitle(params: {
 - year: ${year || "unknown"}
 
 Generate the title.`;
-
   const title = await callOpenAI(
     [
       { role: "system", content: PR_TITLE_SYSTEM_PROMPT },
-      { role: "user", content: userPrompt },
+      { role: "user", content: userPrompt }
     ],
     apiKey,
-    MODELS.judge,
+    MODELS.judge
   );
-
   const cleaned = title.trim().split("\n")[0].toLowerCase();
   const isValid = /^add [a-z0-9]+ [a-z]+ \d{4} (final|midterm|quiz|exam)$/.test(
-    cleaned,
+    cleaned
   );
   if (!isValid) {
     return buildPullRequestTitleFallback(examId);
   }
-
   return cleaned;
 }
-
-async function buildPullRequestBody(params: {
-  apiKey: string;
-  examTitle: string;
-  examId: string;
-  examDir: string;
-  solutionFileName: string;
-  referenceFileNames: string[];
-}): Promise<string> {
+async function buildPullRequestBody(params) {
   const {
     apiKey,
     examTitle,
     examId,
     examDir,
     solutionFileName,
-    referenceFileNames,
+    referenceFileNames
   } = params;
-
   const template = `## Description
 
 Brief description of what this PR does.
@@ -449,10 +449,7 @@ How was this tested?
 - [ ] Code follows project style guidelines
 - [ ] Documentation updated (if needed)
 `;
-
-  const refList =
-    referenceFileNames.length > 0 ? referenceFileNames.join(", ") : "None";
-
+  const refList = referenceFileNames.length > 0 ? referenceFileNames.join(", ") : "None";
   const userPrompt = `Fill the template using this context:
 - Exam title: ${examTitle}
 - Exam ID: ${examId}
@@ -464,17 +461,15 @@ How was this tested?
 Template:
 ${template}
 `;
-
   return callOpenAI(
     [
       { role: "system", content: PR_BODY_SYSTEM_PROMPT },
-      { role: "user", content: userPrompt },
+      { role: "user", content: userPrompt }
     ],
     apiKey,
-    MODELS.judge,
+    MODELS.judge
   );
 }
-
 const EXAM_SYSTEM_PROMPT = `You are an expert at converting exam documents into a structured markdown format for the CourseExam benchmark.
 
 You will receive:
@@ -589,68 +584,52 @@ MULTI-PART QUESTIONS:
 - Example: If Q8 has parts a-d each analyzing different code, each part (8a, 8b, 8c, 8d) must include its own code snippet
 
 Output ONLY the exam.md content.`;
-
-export const POST: APIRoute = async ({ request }) => {
+const POST = async ({ request }) => {
   const clientIp = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
-  const { allowed, retryAfter } = checkRateLimit(clientIp, 60_000, 5);
+  const { allowed, retryAfter } = checkRateLimit(clientIp, 6e4, 5);
   if (!allowed) {
     return new Response(JSON.stringify({ error: "Too many requests" }), {
       status: 429,
-      headers: { "Content-Type": "application/json", "Retry-After": String(retryAfter) },
+      headers: { "Content-Type": "application/json", "Retry-After": String(retryAfter) }
     });
   }
-
   const encoder = new TextEncoder();
-
   const stream = new ReadableStream({
     async start(controller) {
       const startTime = Date.now();
-      const log = (msg: string) => {
+      const log = (msg) => {
         controller.enqueue(encoder.encode(msg + "\n"));
       };
-
       try {
         const formData = await request.formData();
-
-        const examId = formData.get("examId") as string;
-        const examName = formData.get("examName") as string;
-        const course = formData.get("course") as string;
-        const institution = formData.get("institution") as string;
-        const year = formData.get("year") as string;
-        const scoreTotal = formData.get("scoreTotal") as string;
-        const tags = formData.get("tags") as string;
-        const notes = formData.get("notes") as string;
-        const examFile = formData.get("examFile") as File;
-        const solutionsFile = formData.get("solutionsFile") as File;
-        const apiKey =
-          (formData.get("apiKey") as string) || process.env.OPENAI_API_KEY;
-        const repoPath = formData.get("repoPath") as string;
-        const githubUsername = formData.get("githubUsername") as string;
-        const githubToken = formData.get("githubToken") as string;
-
+        const examId = formData.get("examId");
+        const examName = formData.get("examName");
+        const course = formData.get("course");
+        const institution = formData.get("institution");
+        const year = formData.get("year");
+        const scoreTotal = formData.get("scoreTotal");
+        const tags = formData.get("tags");
+        const notes = formData.get("notes");
+        const examFile = formData.get("examFile");
+        const solutionsFile = formData.get("solutionsFile");
+        const apiKey = formData.get("apiKey") || process.env.OPENAI_API_KEY;
+        const repoPath = formData.get("repoPath");
+        const githubUsername = formData.get("githubUsername");
+        const githubToken = formData.get("githubToken");
         const hasGitHub = !!(githubUsername && githubToken && repoPath);
-
         if (!apiKey) {
           log("Error: no OpenAI API key provided");
           controller.close();
           return;
         }
-
-        // Extract exam text
         log(`Reading ${examFile.name}...`);
         const examText = await extractTextFromFile(examFile, apiKey);
         log(`  ${examText.length.toLocaleString()} chars`);
-
-        // Extract solutions text
         log(`Reading ${solutionsFile.name}...`);
         const solutionsText = await extractTextFromFile(solutionsFile, apiKey);
         log(`  ${solutionsText.length.toLocaleString()} chars`);
-
-        // Generate exam.md
         log(`Generating markdown...`);
-
-        // Build metadata overrides section - only include fields that were provided
-        const overrides: string[] = [];
+        const overrides = [];
         if (examId) overrides.push(`- Exam ID: ${examId}`);
         if (examName) overrides.push(`- Exam Name: ${examName}`);
         if (course) overrides.push(`- Course: ${course}`);
@@ -658,16 +637,13 @@ export const POST: APIRoute = async ({ request }) => {
         if (year) overrides.push(`- Year: ${year}`);
         if (scoreTotal) overrides.push(`- Total Score: ${scoreTotal}`);
         if (tags) overrides.push(`- Tags: ${tags}`);
-
         if (overrides.length > 0) {
           log(`  overrides: ${course || "–"} @ ${institution || "–"}`);
         }
+        const overridesSection = overrides.length > 0 ? `The following metadata was explicitly provided as overrides (use these values):
+${overrides.join("\n")}
 
-        const overridesSection =
-          overrides.length > 0
-            ? `The following metadata was explicitly provided as overrides (use these values):\n${overrides.join("\n")}\n\nFor any fields NOT listed above, infer them from the exam content.`
-            : `No metadata overrides were provided. Infer ALL metadata fields from the exam content.`;
-
+For any fields NOT listed above, infer them from the exam content.` : `No metadata overrides were provided. Infer ALL metadata fields from the exam content.`;
         const userPrompt = `${overridesSection}
 
 IMPORTANT - Exam filename: "${examFile.name}"
@@ -687,61 +663,51 @@ ${examText}
 ${solutionsText}
 
 Please generate the exam.md file following the exact format specified. Remember to infer any metadata not explicitly provided above.`;
-
         const generatedExamMd = await callOpenAI(
           [
             { role: "system", content: EXAM_SYSTEM_PROMPT },
-            { role: "user", content: userPrompt },
+            { role: "user", content: userPrompt }
           ],
           apiKey,
-          MODELS.generator,
+          MODELS.generator
         );
-
         log(`  ${generatedExamMd.length.toLocaleString()} chars`);
-
-        // Validate with judge
         log(`Validating...`);
-
         const examMd = await callOpenAI(
           [
             { role: "system", content: JUDGE_SYSTEM_PROMPT },
             {
               role: "user",
-              content: `Please validate and correct the following exam.md content:\n\n${generatedExamMd}`,
-            },
+              content: `Please validate and correct the following exam.md content:
+
+${generatedExamMd}`
+            }
           ],
           apiKey,
-          MODELS.judge,
+          MODELS.judge
         );
-
         log(`  ${examMd.length.toLocaleString()} chars`);
-
-        // Format verification
         log(`Formatting...`);
-
         const formattedExamMd = await callOpenAI(
           [
             { role: "system", content: FORMAT_SYSTEM_PROMPT },
             {
               role: "user",
-              content: `Please verify and correct the formatting of the following exam.md content:\n\n${examMd}`,
-            },
+              content: `Please verify and correct the formatting of the following exam.md content:
+
+${examMd}`
+            }
           ],
           apiKey,
-          MODELS.judge,
+          MODELS.judge
         );
-
         log(`  ${formattedExamMd.length.toLocaleString()} chars`);
-
         const finalExamMd = normalizeExamMetadataAndTags(formattedExamMd);
         if (finalExamMd !== formattedExamMd) {
           log("  normalized tags/metadata");
         }
-
         assertIntegerPoints(finalExamMd);
         assertNonEmptyAnswers(finalExamMd);
-
-        // Extract exam_id from generated content if not provided
         let finalExamId = examId;
         if (!finalExamId) {
           const match = finalExamMd.match(/"exam_id"\s*:\s*"([^"]+)"/);
@@ -751,31 +717,25 @@ Please generate the exam.md file following the exact format specified. Remember 
             finalExamId = `exam_${Date.now()}`;
           }
         }
-        // Create directory
         const courseExamPath = getExamPath(repoPath);
         const examDir = path.join(courseExamPath, finalExamId);
         log(`ID: ${finalExamId}`);
-
         try {
           await fs.access(path.join(examDir, "exam.md"));
           log(`Error: exam already exists at ${examDir}`);
           controller.close();
           return;
-        } catch {}
-
+        } catch {
+        }
         await fs.mkdir(examDir, { recursive: true });
-
-        // Write files
         log(`Writing files...`);
         await fs.writeFile(path.join(examDir, "exam.md"), finalExamMd, "utf-8");
         const fileNames = ["exam.md"];
-
         const solutionsPath = path.join(examDir, solutionsFile.name);
         const solutionsContent = Buffer.from(await solutionsFile.arrayBuffer());
         await fs.writeFile(solutionsPath, solutionsContent);
         fileNames.push(solutionsFile.name);
-
-        const referenceFiles = formData.getAll("referenceFiles") as File[];
+        const referenceFiles = formData.getAll("referenceFiles");
         for (const refFile of referenceFiles) {
           const refPath = path.join(examDir, refFile.name);
           const refContent = Buffer.from(await refFile.arrayBuffer());
@@ -783,108 +743,76 @@ Please generate the exam.md file following the exact format specified. Remember 
           fileNames.push(refFile.name);
         }
         log(`  ${fileNames.join(", ")}`);
-
-        // Prepare dataset
         log(`Preparing dataset...`);
         const courseExamBenchPath = getCourseExamBenchPath(repoPath);
         try {
           await execAsync(
             "python3 courseexam/prepare.py",
-            { cwd: courseExamBenchPath },
+            { cwd: courseExamBenchPath }
           );
           log("  passed");
-        } catch (error: unknown) {
-          const errorMsg =
-            error instanceof Error ? error.message : String(error);
-          const execError = error as { stdout?: string; stderr?: string };
+        } catch (error) {
+          const errorMsg = error instanceof Error ? error.message : String(error);
+          const execError = error;
           if (execError.stderr?.trim()) {
             log(`  ${execError.stderr.trim()}`);
           }
           throw new Error(`Dataset preparation failed: ${errorMsg}`);
         }
-
-        // Validate dataset schema
         log(`Validating schema...`);
         try {
           await execAsync(
             "python3 -m pytest tests/test_data_schema.py -q",
-            { cwd: courseExamBenchPath },
+            { cwd: courseExamBenchPath }
           );
           log("  passed");
-        } catch (error: unknown) {
-          const errorMsg =
-            error instanceof Error ? error.message : String(error);
-          const execError = error as { stdout?: string; stderr?: string };
+        } catch (error) {
+          const errorMsg = error instanceof Error ? error.message : String(error);
+          const execError = error;
           if (execError.stderr?.trim()) {
             log(`  ${execError.stderr.trim()}`);
           }
           throw new Error(`Schema validation failed: ${errorMsg}`);
         }
-
         if (hasGitHub) {
           const examNameMatch = finalExamMd.match(
-            /"test_paper_name"\s*:\s*"([^"]+)"/,
+            /"test_paper_name"\s*:\s*"([^"]+)"/
           );
           const courseMatch = finalExamMd.match(/"course"\s*:\s*"([^"]+)"/);
           const yearMatch = finalExamMd.match(/"year"\s*:\s*(\d+)/);
-
           let branchName = finalExamId.replace(/_/g, "-");
-          if (
-            !branchName ||
-            branchName === `exam-${Date.now()}`.replace(/_/g, "-")
-          ) {
-            const coursePart = courseMatch
-              ? courseMatch[1].toLowerCase().replace(/\s+/g, "")
-              : "exam";
-            const yearPart = yearMatch
-              ? yearMatch[1]
-              : new Date().getFullYear();
-            const typePart = finalExamId.includes("final")
-              ? "final"
-              : finalExamId.includes("midterm")
-                ? "midterm"
-                : "exam";
+          if (!branchName || branchName === `exam-${Date.now()}`.replace(/_/g, "-")) {
+            const coursePart = courseMatch ? courseMatch[1].toLowerCase().replace(/\s+/g, "") : "exam";
+            const yearPart = yearMatch ? yearMatch[1] : (/* @__PURE__ */ new Date()).getFullYear();
+            const typePart = finalExamId.includes("final") ? "final" : finalExamId.includes("midterm") ? "midterm" : "exam";
             branchName = `${coursePart}-${yearPart}-${typePart}`;
           }
-
-          const examTitle = (examNameMatch ? examNameMatch[1] : finalExamId)
-            .replace(/[()]/g, "")
-            .replace(/"/g, "'");
+          const examTitle = (examNameMatch ? examNameMatch[1] : finalExamId).replace(/[()]/g, "").replace(/"/g, "'");
           const remoteUrl = `https://${githubUsername}:${githubToken}@github.com/${githubUsername}/system-intelligence-benchmark.git`;
-
-          const git = (cmd: string) => execAsync(`git -C "${repoPath}" ${cmd}`);
-
+          const git = (cmd) => execAsync(`git -C "${repoPath}" ${cmd}`);
           const worktreeDir = path.join(
             repoPath,
             ".worktrees",
-            `exam-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            `exam-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
           );
-
-          // Create git branch
           log(`Creating branch ${branchName}...`);
           try {
             await git(`fetch origin main`);
-
             try {
               await git(`branch ${branchName} origin/main`);
-            } catch (error: unknown) {
-              const errorMsg =
-                error instanceof Error ? error.message : String(error);
+            } catch (error) {
+              const errorMsg = error instanceof Error ? error.message : String(error);
               if (!errorMsg.includes("already exists")) {
                 throw error;
               }
             }
-
             await fs.mkdir(path.dirname(worktreeDir), { recursive: true });
             await git(`worktree add "${worktreeDir}" ${branchName}`);
             log(`  done`);
-          } catch (error: unknown) {
-            const errorMsg =
-              error instanceof Error ? error.message : String(error);
+          } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error);
             throw new Error(`Failed to create branch/worktree: ${errorMsg}`);
           }
-
-          // Commit and push
           log(`Pushing to GitHub...`);
           try {
             const worktreeExamDir = path.join(
@@ -893,28 +821,23 @@ Please generate the exam.md file following the exact format specified. Remember 
               "courseexam_bench",
               "data",
               "raw",
-              finalExamId,
+              finalExamId
             );
             await fs.mkdir(worktreeExamDir, { recursive: true });
-
             const files = await fs.readdir(examDir);
             for (const file of files) {
               await fs.copyFile(
                 path.join(examDir, file),
-                path.join(worktreeExamDir, file),
+                path.join(worktreeExamDir, file)
               );
             }
-
-            const wtGit = (cmd: string) =>
-              execAsync(`git -C "${worktreeDir}" ${cmd}`);
-
+            const wtGit = (cmd) => execAsync(`git -C "${worktreeDir}" ${cmd}`);
             await wtGit(`add -A`);
             await wtGit(`commit -m "add ${examTitle}"`);
             await wtGit(`push "${remoteUrl}" ${branchName}`);
             log(`  pushed to origin/${branchName}`);
-          } catch (error: unknown) {
-            const errorMsg =
-              error instanceof Error ? error.message : String(error);
+          } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error);
             throw new Error(`Failed to push to GitHub: ${errorMsg}`);
           } finally {
             try {
@@ -924,12 +847,9 @@ Please generate the exam.md file following the exact format specified. Remember 
                 await fs.rm(worktreeDir, { recursive: true, force: true });
                 await git(`worktree prune`);
               } catch {
-                // Ignore cleanup errors
               }
             }
           }
-
-          // Create pull request
           log(`Creating pull request...`);
           try {
             const prTitle = await buildPullRequestTitle({
@@ -937,7 +857,7 @@ Please generate the exam.md file following the exact format specified. Remember 
               examId: finalExamId,
               examTitle,
               course: courseMatch?.[1],
-              year: yearMatch?.[1],
+              year: yearMatch?.[1]
             });
             const prBody = await buildPullRequestBody({
               apiKey,
@@ -945,38 +865,44 @@ Please generate the exam.md file following the exact format specified. Remember 
               examId: finalExamId,
               examDir,
               solutionFileName: solutionsFile.name,
-              referenceFileNames: referenceFiles.map((refFile) => refFile.name),
+              referenceFileNames: referenceFiles.map((refFile) => refFile.name)
             });
             const prUrl = await createOrGetPullRequest({
               githubUsername,
               githubToken,
               branchName,
               title: prTitle,
-              body: prBody,
+              body: prBody
             });
             log(`  ${prUrl}`);
-          } catch (error: unknown) {
-            const errorMsg =
-              error instanceof Error ? error.message : String(error);
+          } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error);
             throw new Error(`Failed to create pull request: ${errorMsg}`);
           }
         }
-
-        const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+        const elapsed = ((Date.now() - startTime) / 1e3).toFixed(1);
         log(`Done in ${elapsed}s`);
-
         controller.close();
       } catch (error) {
-        log(`\nError: ${error}`);
+        log(`
+Error: ${error}`);
         controller.close();
       }
-    },
+    }
   });
-
   return new Response(stream, {
     headers: {
       "Content-Type": "text/plain; charset=utf-8",
-      "Transfer-Encoding": "chunked",
-    },
+      "Transfer-Encoding": "chunked"
+    }
   });
 };
+
+const _page = /*#__PURE__*/Object.freeze(/*#__PURE__*/Object.defineProperty({
+  __proto__: null,
+  POST
+}, Symbol.toStringTag, { value: 'Module' }));
+
+const page = () => _page;
+
+export { page };

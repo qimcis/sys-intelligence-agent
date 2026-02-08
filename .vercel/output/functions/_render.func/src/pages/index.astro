@@ -2,115 +2,179 @@
 import Layout from '../layouts/Layout.astro';
 ---
 
-<Layout title="Add Exams - System Intelligence Benchmark">
-  <div class="block">
-    <div class="block-header">Default Metadata</div>
-    <p style="color: var(--muted); font-size: 0.75rem; margin-bottom: 1rem;">
-      These values apply to all exams uploaded in this session.
-    </p>
-    <div class="row">
-      <div style="flex: 1;">
-        <label for="default-institution">Institution</label>
-        <input type="text" id="default-institution" placeholder="University of Wisconsin-Madison" />
-      </div>
-      <div style="flex: 1;">
-        <label for="default-course">Course</label>
-        <input type="text" id="default-course" placeholder="CS 537" />
-      </div>
-    </div>
-  </div>
-
-  <div class="block">
-    <div class="block-header">Upload Exam Files</div>
-    <p style="color: var(--muted); font-size: 0.75rem; margin-bottom: 1rem;">
-      Upload multiple exam and solution files. AI will automatically match them and process in parallel.
-    </p>
-    <div class="file-input" id="files-dropzone" style="min-height: 120px;">
-      <span>Click or drag to upload exam and solution files</span>
-      <input type="file" id="files-input" accept=".pdf,.txt" multiple />
-      <div class="file-name" id="files-list"></div>
-    </div>
-  </div>
-
-  <div class="block">
-    <div class="block-header">Additional Notes</div>
-    <label for="notes">Notes for AI Processing</label>
-    <textarea id="notes" placeholder="Any specific instructions for parsing the exams (e.g., 'Questions 1-5 are multiple choice', 'Skip questions with figures')"></textarea>
-  </div>
-
-  <button id="process-btn" style="width: 100%;">Process and Add Exam(s)</button>
-
-  <div id="sorting-area" style="display: none;">
+<Layout title="System Intelligence Benchmark">
+  <div id="form-area">
     <div class="block">
-      <div class="block-header">File Matching</div>
-      <div id="sorting-status" class="status loading">Analyzing files...</div>
-      <div id="exam-groups"></div>
+      <div class="block-header">Configuration</div>
+      <p style="color: var(--muted); font-size: 0.75rem; margin-bottom: 1rem;">
+        Configure paths and API key for your local environment.
+      </p>
+
+      <label for="repo-path">Benchmark Repository Path</label>
+      <input type="text" id="repo-path" placeholder="/path/to/system-intelligence-benchmark" />
+      <p style="color: var(--muted); font-size: 0.625rem; margin-top: 0.25rem; margin-bottom: 1rem;">
+        Local path to the cloned system-intelligence-benchmark repository
+      </p>
+
+      <label for="api-key">OpenAI API Key</label>
+      <input type="text" id="api-key" placeholder="sk-..." />
+
+      <div style="margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid var(--border);">
+        <div style="font-size: 0.875rem; font-weight: 500; margin-bottom: 0.25rem;">GitHub Integration (Optional)</div>
+        <p style="color: var(--muted); font-size: 0.625rem; margin-bottom: 1rem;">
+          Auto-create branches and push commits
+        </p>
+
+        <label for="github-username">GitHub Username</label>
+        <input type="text" id="github-username" placeholder="your-username" />
+
+        <label for="github-token">GitHub Personal Access Token</label>
+        <input type="text" id="github-token" placeholder="ghp_..." />
+        <p style="color: var(--muted); font-size: 0.625rem; margin-top: 0.25rem; margin-bottom: 1rem;">
+          Token needs repo write permissions. Creates branches and pushes commits automatically.
+        </p>
+      </div>
+
+      <button id="save-config">Save Configuration</button>
+      <div id="config-status" class="status" style="display: none;"></div>
     </div>
+
+    <div class="block">
+      <div class="block-header">Default Metadata</div>
+      <p style="color: var(--muted); font-size: 0.75rem; margin-bottom: 1rem;">
+        These values apply to all exams uploaded in this session.
+      </p>
+      <div class="row">
+        <div style="flex: 1;">
+          <label for="default-institution">Institution</label>
+          <input type="text" id="default-institution" placeholder="University of Wisconsin-Madison" />
+        </div>
+        <div style="flex: 1;">
+          <label for="default-course">Course</label>
+          <input type="text" id="default-course" placeholder="CS 537" />
+        </div>
+      </div>
+    </div>
+
+    <div class="block">
+      <div class="block-header">Upload Exam Files</div>
+      <p style="color: var(--muted); font-size: 0.75rem; margin-bottom: 1rem;">
+        Upload multiple exam and solution files. AI will automatically match them and process in parallel.
+      </p>
+      <div class="file-input" id="files-dropzone" style="min-height: 120px;">
+        <span>Click or drag to upload exam and solution files</span>
+        <input type="file" id="files-input" accept=".pdf,.txt" multiple />
+        <div class="file-name" id="files-list"></div>
+      </div>
+    </div>
+
+    <div class="block">
+      <div class="block-header">Additional Notes</div>
+      <label for="notes">Notes for AI Processing</label>
+      <textarea id="notes" placeholder="Any specific instructions for parsing the exams (e.g., 'Questions 1-5 are multiple choice', 'Skip questions with figures')"></textarea>
+    </div>
+
+    <button id="process-btn" style="width: 100%;">Process and Add Exam(s)</button>
   </div>
 
-  <div id="status-area" style="display: none;">
-    <div id="process-status" class="status loading">Processing...</div>
+  <div id="processing-area" style="display: none;">
+    <div id="sorting-status" class="status loading" style="display: none;">Matching files...</div>
+    <div id="exam-groups" style="margin-bottom: 1rem;"></div>
+
+    <div id="process-status" class="status loading" style="display: none;">Processing...</div>
     <div id="exam-logs"></div>
   </div>
 
   <style>
+    #form-area.collapsed {
+      display: none;
+    }
     .exam-group {
       border: 1px solid var(--border);
-      border-radius: 4px;
       padding: 0.75rem;
-      margin-bottom: 0.75rem;
-      background: var(--bg-secondary);
+      margin-bottom: 0.5rem;
     }
     .exam-group-header {
       font-weight: 500;
-      margin-bottom: 0.5rem;
-      color: var(--fg);
+      margin-bottom: 0.25rem;
     }
     .exam-group-files {
       font-size: 0.75rem;
       color: var(--muted);
     }
     .exam-group-files div {
-      margin: 0.25rem 0;
+      margin: 0.125rem 0;
     }
     .exam-log {
-      margin-bottom: 1rem;
+      margin-bottom: 1.5rem;
     }
-    .exam-log-header {
-      font-weight: 500;
-      padding: 0.5rem;
-      background: var(--bg-secondary);
-      border: 1px solid var(--border);
-      border-bottom: none;
-      border-radius: 4px 4px 0 0;
+    .exam-log-label {
+      font-size: 0.75rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 0.5rem;
     }
     .exam-log-content {
       border: 1px solid var(--border);
-      border-radius: 0 0 4px 4px;
-      padding: 0.75rem;
-      font-family: monospace;
-      font-size: 0.75rem;
+      padding: 1rem;
+      font-size: 0.8rem;
       white-space: pre-wrap;
-      max-height: 400px;
+      max-height: 500px;
       overflow-y: auto;
-      background: var(--bg);
-      line-height: 1.5;
+      line-height: 1.7;
+      color: var(--muted);
+    }
+    .exam-log-content .step {
+      color: var(--fg);
     }
     .unmatched-files {
-      margin-top: 1rem;
+      margin-top: 0.5rem;
       padding: 0.75rem;
       border: 1px solid var(--warning, #f59e0b);
-      border-radius: 4px;
-      background: rgba(245, 158, 11, 0.1);
-    }
-    .unmatched-files-header {
-      font-weight: 500;
+      font-size: 0.75rem;
       color: var(--warning, #f59e0b);
-      margin-bottom: 0.5rem;
     }
   </style>
 
   <script>
+    // === Config Script ===
+    const repoPathInput = document.getElementById('repo-path') as HTMLInputElement;
+    const keyInput = document.getElementById('api-key') as HTMLInputElement;
+    const githubUsernameInput = document.getElementById('github-username') as HTMLInputElement;
+    const githubTokenInput = document.getElementById('github-token') as HTMLInputElement;
+    const saveBtn = document.getElementById('save-config');
+    const configStatus = document.getElementById('config-status');
+
+    const savedRepoPath = sessionStorage.getItem('benchmark_repo_path');
+    const savedKey = sessionStorage.getItem('openai_api_key');
+    const savedGithubUsername = sessionStorage.getItem('github_username');
+    const savedGithubToken = sessionStorage.getItem('github_token');
+
+    if (savedRepoPath) repoPathInput.value = savedRepoPath;
+    if (savedKey) keyInput.value = savedKey;
+    if (savedGithubUsername) githubUsernameInput.value = savedGithubUsername;
+    if (savedGithubToken) githubTokenInput.value = savedGithubToken;
+
+    saveBtn?.addEventListener('click', () => {
+      const repoPath = repoPathInput.value.trim();
+      const key = keyInput.value.trim();
+      const githubUsername = githubUsernameInput.value.trim();
+      const githubToken = githubTokenInput.value.trim();
+
+      if (repoPath) sessionStorage.setItem('benchmark_repo_path', repoPath);
+      if (key) sessionStorage.setItem('openai_api_key', key);
+      if (githubUsername) sessionStorage.setItem('github_username', githubUsername);
+      if (githubToken) sessionStorage.setItem('github_token', githubToken);
+
+      if (configStatus && (repoPath || key || githubUsername || githubToken)) {
+        configStatus.style.display = 'block';
+        configStatus.className = 'status success';
+        configStatus.textContent = 'Configuration saved to session storage';
+      }
+    });
+
+    // === Exam Upload Script ===
     interface ExamGroup {
       exam_file: string;
       solutions_file: string;
@@ -123,20 +187,19 @@ import Layout from '../layouts/Layout.astro';
       unmatched?: string[];
     }
 
+    const formArea = document.getElementById('form-area')!;
+    const processingArea = document.getElementById('processing-area')!;
     const filesInput = document.getElementById('files-input') as HTMLInputElement;
     const filesDropzone = document.getElementById('files-dropzone')!;
     const filesList = document.getElementById('files-list')!;
     const processBtn = document.getElementById('process-btn') as HTMLButtonElement;
-    const sortingArea = document.getElementById('sorting-area')!;
     const sortingStatus = document.getElementById('sorting-status')!;
     const examGroups = document.getElementById('exam-groups')!;
-    const statusArea = document.getElementById('status-area')!;
     const processStatus = document.getElementById('process-status')!;
     const examLogs = document.getElementById('exam-logs')!;
 
     let uploadedFiles: File[] = [];
 
-    // File input handlers
     filesDropzone.addEventListener('click', () => filesInput.click());
 
     filesDropzone.addEventListener('dragover', (e) => {
@@ -163,7 +226,6 @@ import Layout from '../layouts/Layout.astro';
     });
 
     function addFiles(newFiles: File[]) {
-      // Add new files, avoiding duplicates
       for (const file of newFiles) {
         if (!uploadedFiles.some(f => f.name === file.name)) {
           uploadedFiles.push(file);
@@ -182,7 +244,6 @@ import Layout from '../layouts/Layout.astro';
         ).join('');
         filesDropzone.classList.add('has-file');
 
-        // Add remove handlers
         document.querySelectorAll('.remove-file').forEach(btn => {
           btn.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -195,6 +256,20 @@ import Layout from '../layouts/Layout.astro';
         filesList.innerHTML = '';
         filesDropzone.classList.remove('has-file');
       }
+    }
+
+    function collapseForm() {
+      formArea.classList.add('collapsed');
+      processingArea.style.display = 'block';
+    }
+
+    function expandForm() {
+      formArea.classList.remove('collapsed');
+      processingArea.style.display = 'none';
+      sortingStatus.style.display = 'none';
+      processStatus.style.display = 'none';
+      examGroups.innerHTML = '';
+      examLogs.innerHTML = '';
     }
 
     processBtn.addEventListener('click', async () => {
@@ -211,15 +286,15 @@ import Layout from '../layouts/Layout.astro';
       const githubToken = sessionStorage.getItem('github_token') || '';
 
       if (!apiKey) {
-        alert('Please configure your OpenAI API key on the home page.');
+        alert('Please configure your OpenAI API key above.');
         return;
       }
 
-      processBtn.disabled = true;
-      sortingArea.style.display = 'block';
+      collapseForm();
+
+      sortingStatus.style.display = 'block';
       sortingStatus.className = 'status loading';
-      sortingStatus.textContent = 'Analyzing files with AI...';
-      examGroups.innerHTML = '';
+      sortingStatus.textContent = 'Matching files...';
 
       // Step 1: Sort files using AI
       let sortResult: SortResult;
@@ -244,28 +319,23 @@ import Layout from '../layouts/Layout.astro';
         }
 
         sortingStatus.className = 'status success';
-        sortingStatus.textContent = `Found ${sortResult.exams.length} exam(s)`;
+        sortingStatus.textContent = `Matched ${sortResult.exams.length} exam(s)`;
 
-        // Display matched groups
         examGroups.innerHTML = sortResult.exams.map((exam, i) => `
           <div class="exam-group">
-            <div class="exam-group-header">Exam ${i + 1}: ${exam.inferred_name}</div>
+            <div class="exam-group-header">${exam.inferred_name}</div>
             <div class="exam-group-files">
-              <div><strong>Questions:</strong> ${exam.exam_file}</div>
-              <div><strong>Solutions:</strong> ${exam.solutions_file}</div>
-              ${exam.reference_files?.length ? `<div><strong>References:</strong> ${exam.reference_files.join(', ')}</div>` : ''}
+              <div>Questions: ${exam.exam_file}</div>
+              <div>Solutions: ${exam.solutions_file}</div>
+              ${exam.reference_files?.length ? `<div>References: ${exam.reference_files.join(', ')}</div>` : ''}
             </div>
           </div>
         `).join('');
 
-        // Show unmatched files if any
         if (sortResult.unmatched && sortResult.unmatched.length > 0) {
           examGroups.innerHTML += `
             <div class="unmatched-files">
-              <div class="unmatched-files-header">Unmatched Files</div>
-              <div style="font-size: 0.75rem; color: var(--muted);">
-                ${sortResult.unmatched.join(', ')}
-              </div>
+              Unmatched: ${sortResult.unmatched.join(', ')}
             </div>
           `;
         }
@@ -273,26 +343,24 @@ import Layout from '../layouts/Layout.astro';
       } catch (error) {
         sortingStatus.className = 'status error';
         sortingStatus.textContent = `Error: ${error}`;
-        processBtn.disabled = false;
+        setTimeout(expandForm, 3000);
         return;
       }
 
       // Step 2: Process all exams in parallel
-      statusArea.style.display = 'block';
+      processStatus.style.display = 'block';
       processStatus.className = 'status loading';
-      processStatus.textContent = `Processing ${sortResult.exams.length} exam(s) in parallel...`;
+      processStatus.textContent = `Processing ${sortResult.exams.length} exam(s)...`;
 
       const notes = (document.getElementById('notes') as HTMLTextAreaElement).value.trim();
 
-      // Create log containers for each exam
       examLogs.innerHTML = sortResult.exams.map((exam, i) => `
         <div class="exam-log" id="exam-log-${i}">
-          <div class="exam-log-header">${exam.inferred_name}</div>
-          <div class="exam-log-content" id="exam-log-content-${i}">Starting...</div>
+          <div class="exam-log-label">${exam.inferred_name}</div>
+          <div class="exam-log-content" id="exam-log-content-${i}"></div>
         </div>
       `).join('');
 
-      // Process all exams in parallel
       const processPromises = sortResult.exams.map(async (exam, index) => {
         const logContent = document.getElementById(`exam-log-content-${index}`)!;
 
@@ -328,26 +396,20 @@ import Layout from '../layouts/Layout.astro';
 
           const reader = response.body?.getReader();
           const decoder = new TextDecoder();
-          let firstChunk = true;
 
           if (reader) {
             while (true) {
               const { done, value } = await reader.read();
               if (done) break;
               const text = decoder.decode(value);
-              if (firstChunk) {
-                logContent.textContent = text; // Clear "Starting..." on first chunk
-                firstChunk = false;
-              } else {
-                logContent.textContent += text;
-              }
+              logContent.textContent += text;
               logContent.scrollTop = logContent.scrollHeight;
             }
           }
 
           return { index, success: response.ok, name: exam.inferred_name };
         } catch (error) {
-          logContent.textContent += `\nERROR: ${error}`;
+          logContent.textContent += `\nError: ${error}`;
           return { index, success: false, name: exam.inferred_name, error };
         }
       });
@@ -358,16 +420,17 @@ import Layout from '../layouts/Layout.astro';
 
       if (failCount === 0) {
         processStatus.className = 'status success';
-        processStatus.textContent = `All ${successCount} exam(s) processed successfully!`;
+        processStatus.textContent = `All ${successCount} exam(s) processed`;
       } else if (successCount === 0) {
         processStatus.className = 'status error';
-        processStatus.textContent = `All ${failCount} exam(s) failed to process`;
+        processStatus.textContent = `All ${failCount} exam(s) failed`;
       } else {
         processStatus.className = 'status warning';
-        processStatus.textContent = `${successCount} exam(s) succeeded, ${failCount} failed`;
+        processStatus.textContent = `${successCount} succeeded, ${failCount} failed`;
       }
 
-      processBtn.disabled = false;
+      // Expand form back after a short delay
+      setTimeout(expandForm, 4000);
     });
   </script>
 </Layout>

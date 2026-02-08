@@ -1,5 +1,6 @@
 import type { APIRoute } from "astro";
 import { COURSELAB_PATH, COURSELAB_COURSES_JSON } from "../../../lib/config";
+import { checkRateLimit } from "../../../lib/rate-limit";
 import {
   analyzeLabWithOpenAI,
   type LabAnalysisResult,
@@ -40,6 +41,15 @@ interface LabRequest {
 }
 
 export const POST: APIRoute = async ({ request }) => {
+  const clientIp = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
+  const { allowed, retryAfter } = checkRateLimit(clientIp, 60_000, 5);
+  if (!allowed) {
+    return new Response(JSON.stringify({ error: "Too many requests" }), {
+      status: 429,
+      headers: { "Content-Type": "application/json", "Retry-After": String(retryAfter) },
+    });
+  }
+
   const encoder = new TextEncoder();
 
   const stream = new ReadableStream({
