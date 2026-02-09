@@ -275,10 +275,13 @@ import Layout from '../layouts/Layout.astro';
       sortingStatus.className = 'status loading';
       sortingStatus.textContent = 'Matching files...';
 
+      const apiBase = import.meta.env.PUBLIC_API_BASE_URL || '';
+      const apiUrl = (path: string) => (apiBase ? `${apiBase}${path}` : path);
+
       // Step 1: Sort files using AI
       let sortResult: SortResult;
       try {
-        const sortResponse = await fetch('/api/exams/sort-files', {
+        const sortResponse = await fetch(apiUrl('/api/exams/sort-files'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -364,7 +367,7 @@ import Layout from '../layouts/Layout.astro';
             formData.append('referenceFiles', ref);
           }
 
-          const response = await fetch('/api/exams/process', {
+          const response = await fetch(apiUrl('/api/exams/process'), {
             method: 'POST',
             body: formData
           });

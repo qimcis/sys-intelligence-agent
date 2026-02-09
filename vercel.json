@@ -1,10 +1,13 @@
 {
   "buildCommand": "ASTRO_OUTPUT=static npm run build",
   "outputDirectory": "dist",
+  "env": {
+    "PUBLIC_API_BASE_URL": "http://77.42.24.163"
+  },
   "rewrites": [
     {
       "source": "/api/:path*",
-      "destination": "http://77.42.24.163:4321/api/:path*"
+      "destination": "http://77.42.24.163/api/:path*"
     }
   ]
 }

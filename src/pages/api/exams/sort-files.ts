@@ -2,6 +2,16 @@ import type { APIRoute } from "astro";
 import { callAnthropic, MODELS } from "../../../lib/anthropic-client";
 import { checkRateLimit } from "../../../lib/rate-limit";
 
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type",
+};
+
+export const OPTIONS: APIRoute = async () => {
+  return new Response(null, { status: 204, headers: corsHeaders });
+};
+
 const SORT_SYSTEM_PROMPT = `You are an expert at analyzing exam file names and organizing them for processing.
 
 You will receive a list of file names. Your task is to group them into exams.
@@ -55,7 +65,7 @@ export const POST: APIRoute = async ({ request }) => {
   if (!allowed) {
     return new Response(JSON.stringify({ error: "Too many requests" }), {
       status: 429,
-      headers: { "Content-Type": "application/json", "Retry-After": String(retryAfter) },
+      headers: { "Content-Type": "application/json", "Retry-After": String(retryAfter), ...corsHeaders },
     });
   }
 
@@ -69,14 +79,14 @@ export const POST: APIRoute = async ({ request }) => {
         JSON.stringify({
           error: "Server misconfigured: ANTHROPIC_API_KEY is required",
         }),
-        { status: 500, headers: { "Content-Type": "application/json" } },
+        { status: 500, headers: { "Content-Type": "application/json", ...corsHeaders } },
       );
     }
 
     if (!fileNames || !Array.isArray(fileNames) || fileNames.length === 0) {
       return new Response(JSON.stringify({ error: "No files provided" }), {
         status: 400,
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...corsHeaders },
       });
     }
 
@@ -108,12 +118,12 @@ export const POST: APIRoute = async ({ request }) => {
 
     return new Response(JSON.stringify(result), {
       status: 200,
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...corsHeaders },
     });
   } catch (error) {
     return new Response(JSON.stringify({ error: String(error) }), {
       status: 500,
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...corsHeaders },
     });
   }
 };
