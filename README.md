@@ -42,8 +42,8 @@ This project is intended to run the UI on Vercel and the API on a Docker-capable
 
 UI (Vercel):
 1. Set the Vercel project framework to Astro.
-2. Keep the build command as `npm run build`.
-3. Leave the output directory blank.
+2. Build command: `ASTRO_OUTPUT=static npm run build`.
+3. Output directory: `dist`.
 4. Update `vercel.json` to point `/api/*` to your API host.
 
 API (Docker host):
