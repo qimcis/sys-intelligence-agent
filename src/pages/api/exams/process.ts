@@ -586,80 +586,81 @@ MULTI-PART QUESTIONS:
 Output ONLY the exam.md content.`;
 
 export const POST: APIRoute = async ({ request }) => {
-  const clientIp = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
-  const { allowed, retryAfter } = checkRateLimit(clientIp, 60_000, 5);
-  if (!allowed) {
-    return new Response(JSON.stringify({ error: "Too many requests" }), {
-      status: 429,
-      headers: {
-        "Content-Type": "application/json",
-        "Retry-After": String(retryAfter),
-        ...corsHeaders,
-      },
-    });
-  }
+  try {
+    const clientIp = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
+    const { allowed, retryAfter } = checkRateLimit(clientIp, 60_000, 5);
+    if (!allowed) {
+      return new Response(JSON.stringify({ error: "Too many requests" }), {
+        status: 429,
+        headers: {
+          "Content-Type": "application/json",
+          "Retry-After": String(retryAfter),
+          ...corsHeaders,
+        },
+      });
+    }
 
-  const formData = await request.formData();
+    const formData = await request.formData();
 
-  const examId = formData.get("examId") as string;
-  const examName = formData.get("examName") as string;
-  const course = formData.get("course") as string;
-  const institution = formData.get("institution") as string;
-  const year = formData.get("year") as string;
-  const scoreTotal = formData.get("scoreTotal") as string;
-  const tags = formData.get("tags") as string;
-  const notes = formData.get("notes") as string;
-  const examFile = formData.get("examFile") as File;
-  const solutionsFile = formData.get("solutionsFile") as File;
-  const referenceFiles = formData.getAll("referenceFiles") as File[];
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  const githubUsername = formData.get("githubUsername") as string;
-  const githubToken = formData.get("githubToken") as string;
-  const dockerImage = process.env.SIB_WORKER_IMAGE;
-  const repoUrl = process.env.SIB_REPO_URL;
+    const examId = formData.get("examId") as string;
+    const examName = formData.get("examName") as string;
+    const course = formData.get("course") as string;
+    const institution = formData.get("institution") as string;
+    const year = formData.get("year") as string;
+    const scoreTotal = formData.get("scoreTotal") as string;
+    const tags = formData.get("tags") as string;
+    const notes = formData.get("notes") as string;
+    const examFile = formData.get("examFile") as File;
+    const solutionsFile = formData.get("solutionsFile") as File;
+    const referenceFiles = formData.getAll("referenceFiles") as File[];
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    const githubUsername = formData.get("githubUsername") as string;
+    const githubToken = formData.get("githubToken") as string;
+    const dockerImage = process.env.SIB_WORKER_IMAGE;
+    const repoUrl = process.env.SIB_REPO_URL;
 
-  if (!apiKey) {
-    return new Response(
-      JSON.stringify({
-        error: "Server misconfigured: ANTHROPIC_API_KEY is required",
-      }),
-      { status: 500, headers: { "Content-Type": "application/json", ...corsHeaders } },
-    );
-  }
+    if (!apiKey) {
+      return new Response(
+        JSON.stringify({
+          error: "Server misconfigured: ANTHROPIC_API_KEY is required",
+        }),
+        { status: 500, headers: { "Content-Type": "application/json", ...corsHeaders } },
+      );
+    }
 
-  if (!githubUsername || !githubToken) {
-    return new Response(
-      JSON.stringify({ error: "GitHub username and token are required" }),
-      { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } },
-    );
-  }
+    if (!githubUsername || !githubToken) {
+      return new Response(
+        JSON.stringify({ error: "GitHub username and token are required" }),
+        { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } },
+      );
+    }
 
-  if (!dockerImage || !repoUrl) {
-    return new Response(
-      JSON.stringify({
-        error: "Server misconfigured: SIB_WORKER_IMAGE and SIB_REPO_URL are required",
-      }),
-      { status: 500, headers: { "Content-Type": "application/json", ...corsHeaders } },
-    );
-  }
+    if (!dockerImage || !repoUrl) {
+      return new Response(
+        JSON.stringify({
+          error: "Server misconfigured: SIB_WORKER_IMAGE and SIB_REPO_URL are required",
+        }),
+        { status: 500, headers: { "Content-Type": "application/json", ...corsHeaders } },
+      );
+    }
 
-  if (!examFile || !solutionsFile) {
-    return new Response(JSON.stringify({ error: "Exam and solutions files are required" }), {
-      status: 400,
-      headers: { "Content-Type": "application/json", ...corsHeaders },
-    });
-  }
+    if (!examFile || !solutionsFile) {
+      return new Response(JSON.stringify({ error: "Exam and solutions files are required" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json", ...corsHeaders },
+      });
+    }
 
-  const encoder = new TextEncoder();
+    const encoder = new TextEncoder();
 
-  const stream = new ReadableStream({
-    async start(controller) {
-      const startTime = Date.now();
-      const log = (msg: string) => {
-        controller.enqueue(encoder.encode(msg + "\n"));
-      };
+    const stream = new ReadableStream({
+      async start(controller) {
+        const startTime = Date.now();
+        const log = (msg: string) => {
+          controller.enqueue(encoder.encode(msg + "\n"));
+        };
 
-      try {
+        try {
         // Extract exam text
         log(`Reading ${examFile.name}...`);
         const examText = await extractTextFromFile(examFile, apiKey);
@@ -892,14 +893,20 @@ Please generate the exam.md file following the exact format specified. Remember 
         log(`\nError: ${error}`);
         controller.close();
       }
-    },
-  });
+      },
+    });
 
-  return new Response(stream, {
-    headers: {
-      "Content-Type": "text/plain; charset=utf-8",
-      "Transfer-Encoding": "chunked",
-      ...corsHeaders,
-    },
-  });
+    return new Response(stream, {
+      headers: {
+        "Content-Type": "text/plain; charset=utf-8",
+        "Transfer-Encoding": "chunked",
+        ...corsHeaders,
+      },
+    });
+  } catch (error) {
+    return new Response(JSON.stringify({ error: String(error) }), {
+      status: 500,
+      headers: { "Content-Type": "application/json", ...corsHeaders },
+    });
+  }
 };
