@@ -1,6 +1,6 @@
 import { spawn } from "child_process";
 import path from "path";
-import { callOpenAI, MODELS } from "./openai-client";
+import { callAnthropic, MODELS } from "./anthropic-client";
 
 export interface OpenCodeRunOptions {
   message: string;
@@ -71,7 +71,7 @@ export async function analyzeLabWithOpenAI(
   apiKey: string,
   onLog: (msg: string) => void,
 ): Promise<LabAnalysisResult> {
-  const { callOpenAI } = await import("./openai-client");
+  const { callAnthropic } = await import("./anthropic-client");
   const fs = await import("fs/promises");
 
   // Read directory structure
@@ -183,7 +183,7 @@ Be thorough in identifying all tasks. Look for:
 Output ONLY valid JSON, no other text.`;
 
   onLog(`  -> Using generator model: ${MODELS.generator}`);
-  const generatedResponse = await callOpenAI(
+  const generatedResponse = await callAnthropic(
     [
       {
         role: "system",
@@ -214,7 +214,7 @@ Output ONLY valid JSON, no explanations.
 JSON to validate:
 ${generatedResponse}`;
 
-  const response = await callOpenAI(
+  const response = await callAnthropic(
     [
       {
         role: "system",

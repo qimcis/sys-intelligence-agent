@@ -1,5 +1,5 @@
 import type { APIRoute } from "astro";
-import { callOpenAI, MODELS } from "../../../lib/openai-client";
+import { callAnthropic, MODELS } from "../../../lib/anthropic-client";
 import { checkRateLimit } from "../../../lib/rate-limit";
 
 const SORT_SYSTEM_PROMPT = `You are an expert at analyzing exam file names and organizing them for processing.
@@ -60,13 +60,17 @@ export const POST: APIRoute = async ({ request }) => {
   }
 
   try {
-    const { fileNames, apiKey } = await request.json();
+    const body = await request.json();
+    const fileNames = body?.fileNames;
+    const apiKey = process.env.ANTHROPIC_API_KEY;
 
     if (!apiKey) {
-      return new Response(JSON.stringify({ error: "No API key provided" }), {
-        status: 400,
-        headers: { "Content-Type": "application/json" },
-      });
+      return new Response(
+        JSON.stringify({
+          error: "Server misconfigured: ANTHROPIC_API_KEY is required",
+        }),
+        { status: 500, headers: { "Content-Type": "application/json" } },
+      );
     }
 
     if (!fileNames || !Array.isArray(fileNames) || fileNames.length === 0) {
@@ -78,7 +82,7 @@ export const POST: APIRoute = async ({ request }) => {
 
     const userPrompt = `Here are the uploaded file names:\n${fileNames.map((f: string, i: number) => `${i + 1}. ${f}`).join("\n")}\n\nPlease analyze these files and group them into exam/solution pairs.`;
 
-    const response = await callOpenAI(
+    const response = await callAnthropic(
       [
         { role: "system", content: SORT_SYSTEM_PROMPT },
         { role: "user", content: userPrompt },

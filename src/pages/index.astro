@@ -7,11 +7,8 @@ import Layout from '../layouts/Layout.astro';
     <div class="block">
       <div class="block-header">Configuration</div>
       <p style="color: var(--muted); font-size: 0.75rem; margin-bottom: 1rem;">
-        Configure API key and GitHub credentials for this session.
+        Configure GitHub credentials for this session.
       </p>
-
-      <label for="api-key">OpenAI API Key</label>
-      <input type="text" id="api-key" placeholder="sk-..." />
 
       <div style="margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid var(--border);">
         <div style="font-size: 0.875rem; font-weight: 500; margin-bottom: 0.25rem;">GitHub Integration (Required)</div>
@@ -133,30 +130,25 @@ import Layout from '../layouts/Layout.astro';
 
   <script>
     // === Config Script ===
-    const keyInput = document.getElementById('api-key') as HTMLInputElement;
     const githubUsernameInput = document.getElementById('github-username') as HTMLInputElement;
     const githubTokenInput = document.getElementById('github-token') as HTMLInputElement;
     const saveBtn = document.getElementById('save-config');
     const configStatus = document.getElementById('config-status');
 
-    const savedKey = sessionStorage.getItem('openai_api_key');
     const savedGithubUsername = sessionStorage.getItem('github_username');
     const savedGithubToken = sessionStorage.getItem('github_token');
 
-    if (savedKey) keyInput.value = savedKey;
     if (savedGithubUsername) githubUsernameInput.value = savedGithubUsername;
     if (savedGithubToken) githubTokenInput.value = savedGithubToken;
 
     saveBtn?.addEventListener('click', () => {
-      const key = keyInput.value.trim();
       const githubUsername = githubUsernameInput.value.trim();
       const githubToken = githubTokenInput.value.trim();
 
-      if (key) sessionStorage.setItem('openai_api_key', key);
       if (githubUsername) sessionStorage.setItem('github_username', githubUsername);
       if (githubToken) sessionStorage.setItem('github_token', githubToken);
 
-      if (configStatus && (key || githubUsername || githubToken)) {
+      if (configStatus && (githubUsername || githubToken)) {
         configStatus.style.display = 'block';
         configStatus.className = 'status success';
         configStatus.textContent = 'Configuration saved to session storage';
@@ -267,16 +259,11 @@ import Layout from '../layouts/Layout.astro';
         return;
       }
 
-      const apiKey = sessionStorage.getItem('openai_api_key') || '';
       const defaultInstitution = (document.getElementById('default-institution') as HTMLInputElement).value.trim();
       const defaultCourse = (document.getElementById('default-course') as HTMLInputElement).value.trim();
       const githubUsername = sessionStorage.getItem('github_username') || '';
       const githubToken = sessionStorage.getItem('github_token') || '';
 
-      if (!apiKey) {
-        alert('Please configure your OpenAI API key above.');
-        return;
-      }
       if (!githubUsername || !githubToken) {
         alert('GitHub username and token are required to create the draft PR.');
         return;
@@ -295,8 +282,7 @@ import Layout from '../layouts/Layout.astro';
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            fileNames: uploadedFiles.map(f => f.name),
-            apiKey
+            fileNames: uploadedFiles.map(f => f.name)
           })
         });
 
@@ -369,8 +355,6 @@ import Layout from '../layouts/Layout.astro';
           formData.append('examFile', examFile);
           formData.append('solutionsFile', solutionsFile);
           formData.append('notes', notes);
-          formData.append('apiKey', apiKey);
-
           if (defaultInstitution) formData.append('institution', defaultInstitution);
           if (defaultCourse) formData.append('course', defaultCourse);
           if (githubUsername) formData.append('githubUsername', githubUsername);

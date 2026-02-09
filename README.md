@@ -8,14 +8,10 @@ npm install
 
 ## Configuration
 
-Set your OpenAI API key either:
-
-1. **Environment variable** (recommended for CLI):
+Set your Anthropic API key via environment variable:
    ```bash
-   export OPENAI_API_KEY=sk-your-api-key-here
+   export ANTHROPIC_API_KEY=sk-ant-your-api-key-here
    ```
-
-2. **Via the web UI**: Enter the key in the configuration section on the home page.
 
 For server-side exam processing with Docker, set:
 - `SIB_WORKER_IMAGE` (Docker image built from `docker/worker/Dockerfile`)
@@ -48,7 +44,7 @@ UI (Vercel):
 
 API (Docker host):
 1. Build the worker image: `docker build -t sib-worker -f docker/worker/Dockerfile .`
-2. Set env vars: `OPENAI_API_KEY`, `SIB_WORKER_IMAGE=sib-worker`, `SIB_REPO_URL`.
+2. Set env vars: `ANTHROPIC_API_KEY`, `SIB_WORKER_IMAGE=sib-worker`, `SIB_REPO_URL`.
 3. Build and run the server: `npm run build` then `node ./dist/server/entry.mjs`.
 
 ## Features
@@ -82,5 +78,5 @@ The AI agent will:
 
 ## Output Locations
 
-- **Exams**: `/system-intelligence-benchmark/benchmarks/courseexam_bench/data/raw/{exam_id}/`
-- **Labs**: `/system-intelligence-benchmark/benchmarks/courselab_bench/data/{course_id}/`
+- **Exams**: `benchmarks/courseexam_bench/data/raw/{exam_id}/`
+- **Labs**: `benchmarks/courselab_bench/data/{course_id}/`

@@ -70,7 +70,7 @@ export const POST: APIRoute = async ({ request }) => {
           githubToken,
         } = data;
         let { courseId, courseName, institution, year, tags } = data;
-        const apiKey = data.apiKey || process.env.OPENAI_API_KEY;
+        const apiKey = data.apiKey || process.env.ANTHROPIC_API_KEY;
         const courseLabPath = getLabPath(repoPath);
         const coursesJsonPath = getCoursesJsonPath(repoPath);
 
@@ -79,7 +79,7 @@ export const POST: APIRoute = async ({ request }) => {
 
         if (!apiKey) {
           log(
-            "ERROR: No OpenAI API key provided. Set OPENAI_API_KEY environment variable or enter it in the UI.",
+            "ERROR: No Anthropic API key provided. Set ANTHROPIC_API_KEY environment variable or enter it in the UI.",
           );
           controller.close();
           return;

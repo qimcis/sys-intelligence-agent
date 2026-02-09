@@ -1,6 +1,6 @@
 import type { APIRoute } from "astro";
 import { extractTextFromFile } from "../../../lib/pdf-utils";
-import { callOpenAI, MODELS } from "../../../lib/openai-client";
+import { callAnthropic, MODELS } from "../../../lib/anthropic-client";
 import { checkRateLimit } from "../../../lib/rate-limit";
 import { runDockerJob } from "../../../lib/docker-runner";
 import fs from "fs/promises";
@@ -377,7 +377,7 @@ async function buildPullRequestTitle(params: {
 
 Generate the title.`;
 
-  const title = await callOpenAI(
+  const title = await callAnthropic(
     [
       { role: "system", content: PR_TITLE_SYSTEM_PROMPT },
       { role: "user", content: userPrompt },
@@ -450,7 +450,7 @@ Template:
 ${template}
 `;
 
-  return callOpenAI(
+  return callAnthropic(
     [
       { role: "system", content: PR_BODY_SYSTEM_PROMPT },
       { role: "user", content: userPrompt },
@@ -598,18 +598,19 @@ export const POST: APIRoute = async ({ request }) => {
   const examFile = formData.get("examFile") as File;
   const solutionsFile = formData.get("solutionsFile") as File;
   const referenceFiles = formData.getAll("referenceFiles") as File[];
-  const apiKey =
-    (formData.get("apiKey") as string) || process.env.OPENAI_API_KEY;
+  const apiKey = process.env.ANTHROPIC_API_KEY;
   const githubUsername = formData.get("githubUsername") as string;
   const githubToken = formData.get("githubToken") as string;
   const dockerImage = process.env.SIB_WORKER_IMAGE;
   const repoUrl = process.env.SIB_REPO_URL;
 
   if (!apiKey) {
-    return new Response(JSON.stringify({ error: "No OpenAI API key provided" }), {
-      status: 400,
-      headers: { "Content-Type": "application/json" },
-    });
+    return new Response(
+      JSON.stringify({
+        error: "Server misconfigured: ANTHROPIC_API_KEY is required",
+      }),
+      { status: 500, headers: { "Content-Type": "application/json" } },
+    );
   }
 
   if (!githubUsername || !githubToken) {
@@ -697,7 +698,7 @@ ${solutionsText}
 
 Please generate the exam.md file following the exact format specified. Remember to infer any metadata not explicitly provided above.`;
 
-        const generatedExamMd = await callOpenAI(
+        const generatedExamMd = await callAnthropic(
           [
             { role: "system", content: EXAM_SYSTEM_PROMPT },
             { role: "user", content: userPrompt },
@@ -711,7 +712,7 @@ Please generate the exam.md file following the exact format specified. Remember 
         // Validate with judge
         log(`Validating...`);
 
-        const examMd = await callOpenAI(
+        const examMd = await callAnthropic(
           [
             { role: "system", content: JUDGE_SYSTEM_PROMPT },
             {
@@ -728,7 +729,7 @@ Please generate the exam.md file following the exact format specified. Remember 
         // Format verification
         log(`Formatting...`);
 
-        const formattedExamMd = await callOpenAI(
+        const formattedExamMd = await callAnthropic(
           [
             { role: "system", content: FORMAT_SYSTEM_PROMPT },
             {

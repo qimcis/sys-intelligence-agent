@@ -1,4 +1,5 @@
 import { pdf } from "pdf-to-img";
+import { callAnthropic } from "./anthropic-client";
 
 const MIN_TEXT_LENGTH = 100;
 
@@ -35,43 +36,30 @@ export async function extractTextFromPdfWithOcr(
     pageNum++;
     const base64Image = image.toString("base64");
 
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: "gpt-4o",
-        messages: [
-          {
-            role: "user",
-            content: [
-              {
-                type: "text",
-                text: "Extract ALL text from this image exactly as it appears. Preserve the original formatting, layout, and structure as much as possible. Include all questions, answers, headers, footers, and any other text. Output ONLY the extracted text, nothing else.",
+    const pageText = await callAnthropic(
+      [
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: "Extract ALL text from this image exactly as it appears. Preserve the original formatting, layout, and structure as much as possible. Include all questions, answers, headers, footers, and any other text. Output ONLY the extracted text, nothing else.",
+            },
+            {
+              type: "image",
+              source: {
+                type: "base64",
+                media_type: "image/png",
+                data: base64Image,
               },
-              {
-                type: "image_url",
-                image_url: {
-                  url: `data:image/png;base64,${base64Image}`,
-                  detail: "high",
-                },
-              },
-            ],
-          },
-        ],
-        max_tokens: 4096,
-      }),
-    });
-
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`OpenAI Vision API error: ${error}`);
-    }
-
-    const result = await response.json();
-    const pageText = result.choices?.[0]?.message?.content || "";
+            },
+          ],
+        },
+      ],
+      apiKey,
+      undefined,
+      { maxTokens: 4096 },
+    );
     pages.push(`--- Page ${pageNum} ---\n${pageText}`);
   }
 
