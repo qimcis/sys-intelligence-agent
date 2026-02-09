@@ -14,5 +14,8 @@ const output =
 
 export default defineConfig({
   output,
+  security: {
+    checkOrigin: false,
+  },
   ...(output === "server" ? { adapter: node({ mode: "standalone" }) } : {}),
 });
