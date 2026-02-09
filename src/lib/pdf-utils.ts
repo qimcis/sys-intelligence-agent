@@ -16,6 +16,7 @@ export async function extractTextFromPdf(buffer: Buffer): Promise<string> {
 export async function extractTextFromPdfWithOcr(
   buffer: Buffer,
   apiKey: string,
+  onLog?: (msg: string) => void,
 ): Promise<string> {
   let extractedText = "";
   try {
@@ -26,7 +27,11 @@ export async function extractTextFromPdfWithOcr(
     return extractedText;
   }
 
-  console.log("PDF appears to be image-based, using OCR...");
+  if (onLog) {
+    onLog("PDF appears to be image-based, using OCR...");
+  } else {
+    console.log("PDF appears to be image-based, using OCR...");
+  }
 
   const pages: string[] = [];
   let pageNum = 0;
@@ -69,12 +74,13 @@ export async function extractTextFromPdfWithOcr(
 export async function extractTextFromFile(
   file: File,
   apiKey?: string,
+  onLog?: (msg: string) => void,
 ): Promise<string> {
   const buffer = Buffer.from(await file.arrayBuffer());
 
   if (file.name.endsWith(".pdf")) {
     if (apiKey) {
-      return extractTextFromPdfWithOcr(buffer, apiKey);
+      return extractTextFromPdfWithOcr(buffer, apiKey, onLog);
     }
     return extractTextFromPdf(buffer);
   } else if (file.name.endsWith(".txt") || file.name.endsWith(".md")) {

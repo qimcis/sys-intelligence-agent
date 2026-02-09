@@ -7,16 +7,6 @@ import fs from "fs/promises";
 import path from "path";
 import os from "os";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type",
-};
-
-export const OPTIONS: APIRoute = async () => {
-  return new Response(null, { status: 204, headers: corsHeaders });
-};
-
 const JUDGE_SYSTEM_PROMPT = `You are a meticulous judge that validates and corrects exam markdown files for the CourseExam benchmark.
 
 Your task is to review the generated exam.md content and fix ALL issues:
@@ -595,7 +585,6 @@ export const POST: APIRoute = async ({ request }) => {
         headers: {
           "Content-Type": "application/json",
           "Retry-After": String(retryAfter),
-          ...corsHeaders,
         },
       });
     }
@@ -624,14 +613,14 @@ export const POST: APIRoute = async ({ request }) => {
         JSON.stringify({
           error: "Server misconfigured: ANTHROPIC_API_KEY is required",
         }),
-        { status: 500, headers: { "Content-Type": "application/json", ...corsHeaders } },
+        { status: 500, headers: { "Content-Type": "application/json" } },
       );
     }
 
     if (!githubUsername || !githubToken) {
       return new Response(
         JSON.stringify({ error: "GitHub username and token are required" }),
-        { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } },
+        { status: 400, headers: { "Content-Type": "application/json" } },
       );
     }
 
@@ -640,14 +629,14 @@ export const POST: APIRoute = async ({ request }) => {
         JSON.stringify({
           error: "Server misconfigured: SIB_WORKER_IMAGE and SIB_REPO_URL are required",
         }),
-        { status: 500, headers: { "Content-Type": "application/json", ...corsHeaders } },
+        { status: 500, headers: { "Content-Type": "application/json" } },
       );
     }
 
     if (!examFile || !solutionsFile) {
       return new Response(JSON.stringify({ error: "Exam and solutions files are required" }), {
         status: 400,
-        headers: { "Content-Type": "application/json", ...corsHeaders },
+        headers: { "Content-Type": "application/json" },
       });
     }
 
@@ -663,12 +652,12 @@ export const POST: APIRoute = async ({ request }) => {
         try {
         // Extract exam text
         log(`Reading ${examFile.name}...`);
-        const examText = await extractTextFromFile(examFile, apiKey);
+        const examText = await extractTextFromFile(examFile, apiKey, log);
         log(`  ${examText.length.toLocaleString()} chars`);
 
         // Extract solutions text
         log(`Reading ${solutionsFile.name}...`);
-        const solutionsText = await extractTextFromFile(solutionsFile, apiKey);
+        const solutionsText = await extractTextFromFile(solutionsFile, apiKey, log);
         log(`  ${solutionsText.length.toLocaleString()} chars`);
 
         // Generate exam.md
@@ -900,13 +889,12 @@ Please generate the exam.md file following the exact format specified. Remember 
       headers: {
         "Content-Type": "text/plain; charset=utf-8",
         "Transfer-Encoding": "chunked",
-        ...corsHeaders,
       },
     });
   } catch (error) {
     return new Response(JSON.stringify({ error: String(error) }), {
       status: 500,
-      headers: { "Content-Type": "application/json", ...corsHeaders },
+      headers: { "Content-Type": "application/json" },
     });
   }
 };
