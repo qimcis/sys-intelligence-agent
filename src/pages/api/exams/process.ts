@@ -1,14 +1,11 @@
 import type { APIRoute } from "astro";
 import { extractTextFromFile } from "../../../lib/pdf-utils";
 import { callOpenAI, MODELS } from "../../../lib/openai-client";
-import { BENCHMARK_REPO_PATH, COURSEEXAM_PATH } from "../../../lib/config";
 import { checkRateLimit } from "../../../lib/rate-limit";
+import { runDockerJob } from "../../../lib/docker-runner";
 import fs from "fs/promises";
 import path from "path";
-import { exec } from "child_process";
-import { promisify } from "util";
-
-const execAsync = promisify(exec);
+import os from "os";
 
 const JUDGE_SYSTEM_PROMPT = `You are a meticulous judge that validates and corrects exam markdown files for the CourseExam benchmark.
 
@@ -88,18 +85,6 @@ Rules:
 - Year must be 4 digits.
 - Exam type must be "final", "midterm", "quiz", or "exam".
 - Output ONLY the title line, no punctuation or quotes.`;
-
-function getExamPath(repoPath?: string): string {
-  if (repoPath) {
-    return path.join(repoPath, "benchmarks", "courseexam_bench", "data", "raw");
-  }
-  return COURSEEXAM_PATH;
-}
-
-function getCourseExamBenchPath(repoPath?: string): string {
-  const basePath = repoPath || BENCHMARK_REPO_PATH;
-  return path.join(basePath, "benchmarks", "courseexam_bench");
-}
 
 function buildPullRequestTitleFallback(examId: string): string {
   const tokens = examId.toLowerCase().split("_");
@@ -600,6 +585,56 @@ export const POST: APIRoute = async ({ request }) => {
     });
   }
 
+  const formData = await request.formData();
+
+  const examId = formData.get("examId") as string;
+  const examName = formData.get("examName") as string;
+  const course = formData.get("course") as string;
+  const institution = formData.get("institution") as string;
+  const year = formData.get("year") as string;
+  const scoreTotal = formData.get("scoreTotal") as string;
+  const tags = formData.get("tags") as string;
+  const notes = formData.get("notes") as string;
+  const examFile = formData.get("examFile") as File;
+  const solutionsFile = formData.get("solutionsFile") as File;
+  const referenceFiles = formData.getAll("referenceFiles") as File[];
+  const apiKey =
+    (formData.get("apiKey") as string) || process.env.OPENAI_API_KEY;
+  const githubUsername = formData.get("githubUsername") as string;
+  const githubToken = formData.get("githubToken") as string;
+  const dockerImage = process.env.SIB_WORKER_IMAGE;
+  const repoUrl = process.env.SIB_REPO_URL;
+
+  if (!apiKey) {
+    return new Response(JSON.stringify({ error: "No OpenAI API key provided" }), {
+      status: 400,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  if (!githubUsername || !githubToken) {
+    return new Response(
+      JSON.stringify({ error: "GitHub username and token are required" }),
+      { status: 400, headers: { "Content-Type": "application/json" } },
+    );
+  }
+
+  if (!dockerImage || !repoUrl) {
+    return new Response(
+      JSON.stringify({
+        error: "Server misconfigured: SIB_WORKER_IMAGE and SIB_REPO_URL are required",
+      }),
+      { status: 500, headers: { "Content-Type": "application/json" } },
+    );
+  }
+
+  if (!examFile || !solutionsFile) {
+    return new Response(JSON.stringify({ error: "Exam and solutions files are required" }), {
+      status: 400,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
   const encoder = new TextEncoder();
 
   const stream = new ReadableStream({
@@ -610,32 +645,6 @@ export const POST: APIRoute = async ({ request }) => {
       };
 
       try {
-        const formData = await request.formData();
-
-        const examId = formData.get("examId") as string;
-        const examName = formData.get("examName") as string;
-        const course = formData.get("course") as string;
-        const institution = formData.get("institution") as string;
-        const year = formData.get("year") as string;
-        const scoreTotal = formData.get("scoreTotal") as string;
-        const tags = formData.get("tags") as string;
-        const notes = formData.get("notes") as string;
-        const examFile = formData.get("examFile") as File;
-        const solutionsFile = formData.get("solutionsFile") as File;
-        const apiKey =
-          (formData.get("apiKey") as string) || process.env.OPENAI_API_KEY;
-        const repoPath = formData.get("repoPath") as string;
-        const githubUsername = formData.get("githubUsername") as string;
-        const githubToken = formData.get("githubToken") as string;
-
-        const hasGitHub = !!(githubUsername && githubToken && repoPath);
-
-        if (!apiKey) {
-          log("Error: no OpenAI API key provided");
-          controller.close();
-          return;
-        }
-
         // Extract exam text
         log(`Reading ${examFile.name}...`);
         const examText = await extractTextFromFile(examFile, apiKey);
@@ -751,215 +760,113 @@ Please generate the exam.md file following the exact format specified. Remember 
             finalExamId = `exam_${Date.now()}`;
           }
         }
-        // Create directory
-        const courseExamPath = getExamPath(repoPath);
-        const examDir = path.join(courseExamPath, finalExamId);
         log(`ID: ${finalExamId}`);
 
-        try {
-          await fs.access(path.join(examDir, "exam.md"));
-          log(`Error: exam already exists at ${examDir}`);
-          controller.close();
-          return;
-        } catch {}
+        const examNameMatch = finalExamMd.match(
+          /"test_paper_name"\s*:\s*"([^"]+)"/,
+        );
+        const courseMatch = finalExamMd.match(/"course"\s*:\s*"([^"]+)"/);
+        const yearMatch = finalExamMd.match(/"year"\s*:\s*(\d+)/);
 
-        await fs.mkdir(examDir, { recursive: true });
-
-        // Write files
-        log(`Writing files...`);
-        await fs.writeFile(path.join(examDir, "exam.md"), finalExamMd, "utf-8");
-        const fileNames = ["exam.md"];
-
-        const solutionsPath = path.join(examDir, solutionsFile.name);
-        const solutionsContent = Buffer.from(await solutionsFile.arrayBuffer());
-        await fs.writeFile(solutionsPath, solutionsContent);
-        fileNames.push(solutionsFile.name);
-
-        const referenceFiles = formData.getAll("referenceFiles") as File[];
-        for (const refFile of referenceFiles) {
-          const refPath = path.join(examDir, refFile.name);
-          const refContent = Buffer.from(await refFile.arrayBuffer());
-          await fs.writeFile(refPath, refContent);
-          fileNames.push(refFile.name);
-        }
-        log(`  ${fileNames.join(", ")}`);
-
-        // Prepare dataset
-        log(`Preparing dataset...`);
-        const courseExamBenchPath = getCourseExamBenchPath(repoPath);
-        try {
-          await execAsync(
-            "python3 courseexam/prepare.py",
-            { cwd: courseExamBenchPath },
-          );
-          log("  passed");
-        } catch (error: unknown) {
-          const errorMsg =
-            error instanceof Error ? error.message : String(error);
-          const execError = error as { stdout?: string; stderr?: string };
-          if (execError.stderr?.trim()) {
-            log(`  ${execError.stderr.trim()}`);
-          }
-          throw new Error(`Dataset preparation failed: ${errorMsg}`);
-        }
-
-        // Validate dataset schema
-        log(`Validating schema...`);
-        try {
-          await execAsync(
-            "python3 -m pytest tests/test_data_schema.py -q",
-            { cwd: courseExamBenchPath },
-          );
-          log("  passed");
-        } catch (error: unknown) {
-          const errorMsg =
-            error instanceof Error ? error.message : String(error);
-          const execError = error as { stdout?: string; stderr?: string };
-          if (execError.stderr?.trim()) {
-            log(`  ${execError.stderr.trim()}`);
-          }
-          throw new Error(`Schema validation failed: ${errorMsg}`);
-        }
-
-        if (hasGitHub) {
-          const examNameMatch = finalExamMd.match(
-            /"test_paper_name"\s*:\s*"([^"]+)"/,
-          );
-          const courseMatch = finalExamMd.match(/"course"\s*:\s*"([^"]+)"/);
-          const yearMatch = finalExamMd.match(/"year"\s*:\s*(\d+)/);
-
-          let branchName = finalExamId.replace(/_/g, "-");
-          if (
-            !branchName ||
-            branchName === `exam-${Date.now()}`.replace(/_/g, "-")
-          ) {
-            const coursePart = courseMatch
-              ? courseMatch[1].toLowerCase().replace(/\s+/g, "")
+        let branchName = finalExamId.replace(/_/g, "-");
+        if (
+          !branchName ||
+          branchName === `exam-${Date.now()}`.replace(/_/g, "-")
+        ) {
+          const coursePart = courseMatch
+            ? courseMatch[1].toLowerCase().replace(/\s+/g, "")
+            : "exam";
+          const yearPart = yearMatch ? yearMatch[1] : new Date().getFullYear();
+          const typePart = finalExamId.includes("final")
+            ? "final"
+            : finalExamId.includes("midterm")
+              ? "midterm"
               : "exam";
-            const yearPart = yearMatch
-              ? yearMatch[1]
-              : new Date().getFullYear();
-            const typePart = finalExamId.includes("final")
-              ? "final"
-              : finalExamId.includes("midterm")
-                ? "midterm"
-                : "exam";
-            branchName = `${coursePart}-${yearPart}-${typePart}`;
-          }
+          branchName = `${coursePart}-${yearPart}-${typePart}`;
+        }
 
-          const examTitle = (examNameMatch ? examNameMatch[1] : finalExamId)
-            .replace(/[()]/g, "")
-            .replace(/"/g, "'");
-          const remoteUrl = `https://${githubUsername}:${githubToken}@github.com/${githubUsername}/system-intelligence-benchmark.git`;
+        const examTitle = (examNameMatch ? examNameMatch[1] : finalExamId)
+          .replace(/[()]/g, "")
+          .replace(/"/g, "'");
 
-          const git = (cmd: string) => execAsync(`git -C "${repoPath}" ${cmd}`);
+        const jobDir = await fs.mkdtemp(path.join(os.tmpdir(), "sib-exam-"));
+        const inputDir = path.join(jobDir, "input");
+        await fs.mkdir(inputDir, { recursive: true });
 
-          const worktreeDir = path.join(
-            repoPath,
-            ".worktrees",
-            `exam-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        try {
+          log(`Staging files...`);
+          await fs.writeFile(
+            path.join(inputDir, "exam.md"),
+            finalExamMd,
+            "utf-8",
           );
 
-          // Create git branch
-          log(`Creating branch ${branchName}...`);
-          try {
-            await git(`fetch origin main`);
+          const fileNames = ["exam.md"];
+          const solutionsPath = path.join(inputDir, solutionsFile.name);
+          const solutionsContent = Buffer.from(
+            await solutionsFile.arrayBuffer(),
+          );
+          await fs.writeFile(solutionsPath, solutionsContent);
+          fileNames.push(solutionsFile.name);
 
-            try {
-              await git(`branch ${branchName} origin/main`);
-            } catch (error: unknown) {
-              const errorMsg =
-                error instanceof Error ? error.message : String(error);
-              if (!errorMsg.includes("already exists")) {
-                throw error;
-              }
-            }
-
-            await fs.mkdir(path.dirname(worktreeDir), { recursive: true });
-            await git(`worktree add "${worktreeDir}" ${branchName}`);
-            log(`  done`);
-          } catch (error: unknown) {
-            const errorMsg =
-              error instanceof Error ? error.message : String(error);
-            throw new Error(`Failed to create branch/worktree: ${errorMsg}`);
+          for (const refFile of referenceFiles) {
+            const refPath = path.join(inputDir, refFile.name);
+            const refContent = Buffer.from(await refFile.arrayBuffer());
+            await fs.writeFile(refPath, refContent);
+            fileNames.push(refFile.name);
           }
+          log(`  ${fileNames.join(", ")}`);
 
-          // Commit and push
-          log(`Pushing to GitHub...`);
+          log(`Running Docker worker...`);
+          await runDockerJob({
+            image: dockerImage,
+            jobDir,
+            env: {
+              JOB_DIR: "/job",
+              REPO_URL: repoUrl,
+              EXAM_ID: finalExamId,
+              BRANCH_NAME: branchName,
+              GITHUB_USERNAME: githubUsername,
+              GITHUB_TOKEN: githubToken,
+              COMMIT_TITLE: `add ${examTitle}`,
+            },
+            log,
+            redact: [githubToken],
+          });
+        } finally {
           try {
-            const worktreeExamDir = path.join(
-              worktreeDir,
-              "benchmarks",
-              "courseexam_bench",
-              "data",
-              "raw",
-              finalExamId,
-            );
-            await fs.mkdir(worktreeExamDir, { recursive: true });
+            await fs.rm(jobDir, { recursive: true, force: true });
+          } catch {}
+        }
 
-            const files = await fs.readdir(examDir);
-            for (const file of files) {
-              await fs.copyFile(
-                path.join(examDir, file),
-                path.join(worktreeExamDir, file),
-              );
-            }
-
-            const wtGit = (cmd: string) =>
-              execAsync(`git -C "${worktreeDir}" ${cmd}`);
-
-            await wtGit(`add -A`);
-            await wtGit(`commit -m "add ${examTitle}"`);
-            await wtGit(`push "${remoteUrl}" ${branchName}`);
-            log(`  pushed to origin/${branchName}`);
-          } catch (error: unknown) {
-            const errorMsg =
-              error instanceof Error ? error.message : String(error);
-            throw new Error(`Failed to push to GitHub: ${errorMsg}`);
-          } finally {
-            try {
-              await git(`worktree remove "${worktreeDir}" --force`);
-            } catch {
-              try {
-                await fs.rm(worktreeDir, { recursive: true, force: true });
-                await git(`worktree prune`);
-              } catch {
-                // Ignore cleanup errors
-              }
-            }
-          }
-
-          // Create pull request
-          log(`Creating pull request...`);
-          try {
-            const prTitle = await buildPullRequestTitle({
-              apiKey,
-              examId: finalExamId,
-              examTitle,
-              course: courseMatch?.[1],
-              year: yearMatch?.[1],
-            });
-            const prBody = await buildPullRequestBody({
-              apiKey,
-              examTitle,
-              examId: finalExamId,
-              examDir,
-              solutionFileName: solutionsFile.name,
-              referenceFileNames: referenceFiles.map((refFile) => refFile.name),
-            });
-            const prUrl = await createOrGetPullRequest({
-              githubUsername,
-              githubToken,
-              branchName,
-              title: prTitle,
-              body: prBody,
-            });
-            log(`  ${prUrl}`);
-          } catch (error: unknown) {
-            const errorMsg =
-              error instanceof Error ? error.message : String(error);
-            throw new Error(`Failed to create pull request: ${errorMsg}`);
-          }
+        log(`Creating pull request...`);
+        try {
+          const prTitle = await buildPullRequestTitle({
+            apiKey,
+            examId: finalExamId,
+            examTitle,
+            course: courseMatch?.[1],
+            year: yearMatch?.[1],
+          });
+          const prBody = await buildPullRequestBody({
+            apiKey,
+            examTitle,
+            examId: finalExamId,
+            examDir: `benchmarks/courseexam_bench/data/raw/${finalExamId}`,
+            solutionFileName: solutionsFile.name,
+            referenceFileNames: referenceFiles.map((refFile) => refFile.name),
+          });
+          const prUrl = await createOrGetPullRequest({
+            githubUsername,
+            githubToken,
+            branchName,
+            title: prTitle,
+            body: prBody,
+          });
+          log(`  ${prUrl}`);
+        } catch (error: unknown) {
+          const errorMsg = error instanceof Error ? error.message : String(error);
+          throw new Error(`Failed to create pull request: ${errorMsg}`);
         }
 
         const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);

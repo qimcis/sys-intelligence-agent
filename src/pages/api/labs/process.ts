@@ -1,5 +1,4 @@
 import type { APIRoute } from "astro";
-import { COURSELAB_PATH, COURSELAB_COURSES_JSON } from "../../../lib/config";
 import { checkRateLimit } from "../../../lib/rate-limit";
 import {
   analyzeLabWithOpenAI,
@@ -15,10 +14,10 @@ import { promisify } from "util";
 const execAsync = promisify(exec);
 
 function getLabPath(repoPath?: string): string {
-  if (repoPath) {
-    return path.join(repoPath, "benchmarks", "courselab_bench", "data");
+  if (!repoPath) {
+    throw new Error("repoPath is required");
   }
-  return COURSELAB_PATH;
+  return path.join(repoPath, "benchmarks", "courselab_bench", "data");
 }
 
 function getCoursesJsonPath(repoPath?: string): string {

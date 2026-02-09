@@ -7,22 +7,16 @@ import Layout from '../layouts/Layout.astro';
     <div class="block">
       <div class="block-header">Configuration</div>
       <p style="color: var(--muted); font-size: 0.75rem; margin-bottom: 1rem;">
-        Configure paths and API key for your local environment.
-      </p>
-
-      <label for="repo-path">Benchmark Repository Path</label>
-      <input type="text" id="repo-path" placeholder="/path/to/system-intelligence-benchmark" />
-      <p style="color: var(--muted); font-size: 0.625rem; margin-top: 0.25rem; margin-bottom: 1rem;">
-        Local path to the cloned system-intelligence-benchmark repository
+        Configure API key and GitHub credentials for this session.
       </p>
 
       <label for="api-key">OpenAI API Key</label>
       <input type="text" id="api-key" placeholder="sk-..." />
 
       <div style="margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid var(--border);">
-        <div style="font-size: 0.875rem; font-weight: 500; margin-bottom: 0.25rem;">GitHub Integration (Optional)</div>
+        <div style="font-size: 0.875rem; font-weight: 500; margin-bottom: 0.25rem;">GitHub Integration (Required)</div>
         <p style="color: var(--muted); font-size: 0.625rem; margin-bottom: 1rem;">
-          Auto-create branches and push commits
+          Required to create a draft pull request
         </p>
 
         <label for="github-username">GitHub Username</label>
@@ -139,35 +133,30 @@ import Layout from '../layouts/Layout.astro';
 
   <script>
     // === Config Script ===
-    const repoPathInput = document.getElementById('repo-path') as HTMLInputElement;
     const keyInput = document.getElementById('api-key') as HTMLInputElement;
     const githubUsernameInput = document.getElementById('github-username') as HTMLInputElement;
     const githubTokenInput = document.getElementById('github-token') as HTMLInputElement;
     const saveBtn = document.getElementById('save-config');
     const configStatus = document.getElementById('config-status');
 
-    const savedRepoPath = sessionStorage.getItem('benchmark_repo_path');
     const savedKey = sessionStorage.getItem('openai_api_key');
     const savedGithubUsername = sessionStorage.getItem('github_username');
     const savedGithubToken = sessionStorage.getItem('github_token');
 
-    if (savedRepoPath) repoPathInput.value = savedRepoPath;
     if (savedKey) keyInput.value = savedKey;
     if (savedGithubUsername) githubUsernameInput.value = savedGithubUsername;
     if (savedGithubToken) githubTokenInput.value = savedGithubToken;
 
     saveBtn?.addEventListener('click', () => {
-      const repoPath = repoPathInput.value.trim();
       const key = keyInput.value.trim();
       const githubUsername = githubUsernameInput.value.trim();
       const githubToken = githubTokenInput.value.trim();
 
-      if (repoPath) sessionStorage.setItem('benchmark_repo_path', repoPath);
       if (key) sessionStorage.setItem('openai_api_key', key);
       if (githubUsername) sessionStorage.setItem('github_username', githubUsername);
       if (githubToken) sessionStorage.setItem('github_token', githubToken);
 
-      if (configStatus && (repoPath || key || githubUsername || githubToken)) {
+      if (configStatus && (key || githubUsername || githubToken)) {
         configStatus.style.display = 'block';
         configStatus.className = 'status success';
         configStatus.textContent = 'Configuration saved to session storage';
@@ -279,7 +268,6 @@ import Layout from '../layouts/Layout.astro';
       }
 
       const apiKey = sessionStorage.getItem('openai_api_key') || '';
-      const repoPath = sessionStorage.getItem('benchmark_repo_path') || '';
       const defaultInstitution = (document.getElementById('default-institution') as HTMLInputElement).value.trim();
       const defaultCourse = (document.getElementById('default-course') as HTMLInputElement).value.trim();
       const githubUsername = sessionStorage.getItem('github_username') || '';
@@ -287,6 +275,10 @@ import Layout from '../layouts/Layout.astro';
 
       if (!apiKey) {
         alert('Please configure your OpenAI API key above.');
+        return;
+      }
+      if (!githubUsername || !githubToken) {
+        alert('GitHub username and token are required to create the draft PR.');
         return;
       }
 
@@ -379,7 +371,6 @@ import Layout from '../layouts/Layout.astro';
           formData.append('notes', notes);
           formData.append('apiKey', apiKey);
 
-          if (repoPath) formData.append('repoPath', repoPath);
           if (defaultInstitution) formData.append('institution', defaultInstitution);
           if (defaultCourse) formData.append('course', defaultCourse);
           if (githubUsername) formData.append('githubUsername', githubUsername);

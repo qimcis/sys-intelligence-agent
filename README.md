@@ -17,6 +17,10 @@ Set your OpenAI API key either:
 
 2. **Via the web UI**: Enter the key in the configuration section on the home page.
 
+For server-side exam processing with Docker, set:
+- `SIB_WORKER_IMAGE` (Docker image built from `docker/worker/Dockerfile`)
+- `SIB_REPO_URL` (clone URL for the base system-intelligence-benchmark repo)
+
 ## Running
 
 **Development:**
@@ -27,10 +31,25 @@ npm run dev
 **Production:**
 ```bash
 npm run build
-npm run start
+node ./dist/server/entry.mjs
 ```
 
 The server runs on `http://localhost:3000` by default.
+
+## Vercel (UI) + Docker Host (API)
+
+This project is intended to run the UI on Vercel and the API on a Docker-capable host.
+
+UI (Vercel):
+1. Set the Vercel project framework to Astro.
+2. Keep the build command as `npm run build`.
+3. Leave the output directory blank.
+4. Update `vercel.json` to point `/api/*` to your API host.
+
+API (Docker host):
+1. Build the worker image: `docker build -t sib-worker -f docker/worker/Dockerfile .`
+2. Set env vars: `OPENAI_API_KEY`, `SIB_WORKER_IMAGE=sib-worker`, `SIB_REPO_URL`.
+3. Build and run the server: `npm run build` then `node ./dist/server/entry.mjs`.
 
 ## Features
 
@@ -42,6 +61,8 @@ The server runs on `http://localhost:3000` by default.
 4. Upload the solutions PDF/TXT file
 5. Optionally upload reference materials
 6. Click "Process and Add Exam"
+
+GitHub username and token are required to create a draft pull request.
 
 The AI will parse the exam and solutions, generating a structured `exam.md` file in the courseexam format.
 
